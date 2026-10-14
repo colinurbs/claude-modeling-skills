@@ -1,0 +1,17 @@
+{
+ "iconset": {"tier": "S", "status": "wip", "source": "make", "license": "see LICENSES.md", "glyphs": "glyphs.py",
+             "notes": "Intent first: who reads these icons, where, at what size (min legible px), under which treatment; the families and how they are told apart; what the style guide forbids.",
+             "manifest_note": ""},
+ "panel": {"tier": "S", "status": "wip", "source": "make", "license": "see LICENSES.md", "baked_text": [],
+           "notes": "Intent first: what physical thing this is (a bezel, a slip, a plate), where it sits, its sizes in use, what shows through or sits inside, which slots the client fills.",
+           "manifest_note": ""},
+ "template": {"tier": "S", "status": "wip", "source": "make", "license": "see LICENSES.md", "baked_text": [],
+              "notes": "Intent first: which document this is, which data fills it (name the sim fields), the width in use and how it grows, what is printed (only copy-sheet words) and what is typed or stamped at runtime.",
+              "manifest_note": ""},
+ "tokens": {"tier": "S", "status": "wip", "source": "make", "license": "see LICENSES.md",
+            "notes": "Intent first: the materials and states the UI has, and why each colour exists.",
+            "color": {}, "roles": {}, "motion": {}, "crt": {}, "paper": {}, "rebel": {}},
+ "fonts": {"tier": "S", "status": "wip", "source": "ofl", "license": "SIL OFL 1.1 (see LICENSES.md)",
+           "notes": "Intent first: which roles need a face, why these faces, and the licence verified from the primary source (OFL.txt + METADATA.pb in google/fonts; no Reserved Font Name if you subset).",
+           "fonts": [], "subset": {"unicodes": "U+0020-007E,U+00A0-017F,U+2010-2027,U+2030-203A,U+20AC,U+2190-2193"}, "coverage_text": ""}
+}

@@ -1,0 +1,330 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fp review harness</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script src="/gam/node_modules/babylonjs/babylon.js"></script>
+<script src="/gam/node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// First-person review harness for game-animation (driven by shoot_fp.mjs; per-clip items and fp_sleeve layers for hands sets via cfg.clipcfg). Right-handed scene, so node
+// values == glTF values (+Y up, character faces +Z, its left is +X). Clips are converted onto the body's
+// bone frames exactly as packages/engine/src/anim/retarget.ts does; the item hangs off attach_hand_r with an
+// identity transform (engine Rig.attach); moving parts are driven from the meta curves the way the engine
+// is asked to (ig_parts axis * travel/angle * value, carry windows parented to attach_hand_l).
+const B = BABYLON;
+let engine, scene, cfg, cam, sun, shadowGen;
+const S = { nodes: {}, rest: {}, A: {}, Ainv: {}, meshes: [], clips: {}, item: null, parts: {}, partRest: {}, markers: [] };
+const hex = (h, a = 1) => { h = h.replace('#', ''); return new B.Color4(...[0, 2, 4].map(i => parseInt(h.substr(i, 2), 16) / 255), a); };
+const hex3 = h => { const c = hex(h); return new B.Color3(c.r, c.g, c.b); };
+
+window.boot = async (c) => {
+  cfg = c;
+  const canvas = document.getElementById('c');
+  canvas.width = c.w; canvas.height = c.h; canvas.style.width = c.w + 'px'; canvas.style.height = c.h + 'px';
+  engine = new B.Engine(canvas, true, { preserveDrawingBuffer: true, antialias: true, stencil: true, premultipliedAlpha: false, alpha: true });
+  scene = new B.Scene(engine);
+  scene.useRightHandedSystem = true;
+  const R = c.review || {};
+  scene.clearColor = hex(R.background || '#6f7473');
+  const ip = scene.imageProcessingConfiguration;
+  ip.toneMappingEnabled = true; ip.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES; ip.exposure = R.exposure ?? 1.0;
+  const env = new B.HDRCubeTexture(c.hdri, scene, 128, false, true, false, true);
+  await new Promise(res => { if (env.isReady()) res(); else env.onLoadObservable.addOnce(res); setTimeout(res, 8000); });
+  scene.environmentTexture = env; scene.environmentIntensity = 1.0;
+  sun = new B.DirectionalLight('sun', new B.Vector3(0.35, -1, 0.6), scene); sun.intensity = 1.1; sun.position = new B.Vector3(-4, 10, -6);
+  shadowGen = new B.ShadowGenerator(2048, sun); shadowGen.usePercentageCloserFiltering = true; shadowGen.bias = 0.0008; shadowGen.normalBias = 0.004; shadowGen.darkness = 0.35;
+  // backdrop: an overcast street slab (ground, a far wall, a kerb), so framing and scale read
+  const gm = new B.PBRMaterial('__g', scene); gm.albedoColor = hex3(R.ground || '#56595a'); gm.metallic = 0; gm.roughness = 1;
+  const ground = B.MeshBuilder.CreateGround('__ground', { width: 60, height: 60 }, scene); ground.material = gm; ground.receiveShadows = true;
+  const wm = new B.PBRMaterial('__w', scene); wm.albedoColor = hex3('#7b746a'); wm.metallic = 0; wm.roughness = 0.95;
+  const wall = B.MeshBuilder.CreateBox('__wall', { width: 30, height: 9, depth: 0.5 }, scene); wall.position = new B.Vector3(0, 4.5, 7.5); wall.material = wm; wall.receiveShadows = true;
+  const km = new B.PBRMaterial('__k', scene); km.albedoColor = hex3('#8a8a86'); km.metallic = 0; km.roughness = 1;
+  const kerb = B.MeshBuilder.CreateBox('__kerb', { width: 30, height: 0.15, depth: 2.5 }, scene); kerb.position = new B.Vector3(0, 0.075, 6); kerb.material = km;
+  for (let i = -3; i <= 3; i++) { const w = B.MeshBuilder.CreateBox('__win', { width: 1.1, height: 1.6, depth: 0.1 }, scene); w.position = new B.Vector3(i * 3.2, 3.2, 7.22); const m = new B.PBRMaterial('__wm', scene); m.albedoColor = hex3('#2b3032'); m.roughness = 0.3; m.metallic = 0; w.material = m; }
+
+  // arms (fp arms asset, or a full body with only its arm triangles kept)
+  const bodyRes = await B.SceneLoader.ImportMeshAsync('', '/part/', '0.glb', scene);
+  const skel = bodyRes.skeletons[0];
+  if (!skel) throw new Error('arms/body has no skeleton');
+  const byName = {}; for (const n of scene.transformNodes) if (!byName[n.name]) byName[n.name] = n;
+  for (const b of c.bones) if (byName[b]) S.nodes[b] = byName[b];
+  const lod = m => { const k = /_lod(\d)/.exec(m.name); return k ? +k[1] : 0; };
+  const keep = new Set(c.arm_bones);
+  let kept = 0, dropped = 0;
+  for (const m of bodyRes.meshes) {
+    if (!m.getTotalVertices || m.getTotalVertices() === 0) continue;
+    if (lod(m) > 0) { m.setEnabled(false); continue; }
+    if (!c.arms_asset) {
+      const mi = m.getVerticesData(B.VertexBuffer.MatricesIndicesKind), mw = m.getVerticesData(B.VertexBuffer.MatricesWeightsKind), idx = m.getIndices();
+      if (mi && mw && idx) {
+        const bones = (m.skeleton || skel).bones;
+        const isArm = new Uint8Array(mi.length / 4);
+        for (let v = 0; v < isArm.length; v++) {
+          let w = 0; for (let k = 0; k < 4; k++) if (keep.has(bones[mi[v * 4 + k]]?.name)) w += mw[v * 4 + k];
+          isArm[v] = w > 0.5 ? 1 : 0;
+        }
+        const out = [];
+        for (let i = 0; i < idx.length; i += 3) { if (isArm[idx[i]] && isArm[idx[i + 1]] && isArm[idx[i + 2]]) { out.push(idx[i], idx[i + 1], idx[i + 2]); kept++; } else dropped++; }
+        m.makeGeometryUnique(); m.setIndices(out);
+      }
+    }
+    S.meshes.push(m);
+  }
+  for (const m of S.meshes) { m.receiveShadows = true; shadowGen.addShadowCaster(m); m.alwaysSelectAsActiveMesh = true; }
+  for (const b of c.bones) {
+    const n = S.nodes[b]; if (!n) continue;
+    if (!n.rotationQuaternion) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+    S.rest[b] = { p: n.position.clone(), q: n.rotationQuaternion.clone() };
+    const p = c.parents[b]; const pw = (p && S.A[p]) || B.Quaternion.Identity();
+    const w = pw.multiply(S.rest[b].q); w.normalize(); S.A[b] = w; S.Ainv[b] = B.Quaternion.Inverse(w);
+  }
+  // hands set: arms zones (for sleeve culling), every item the set uses, the sleeve layers
+  S.extras = {}; for (const n of [...bodyRes.transformNodes, ...bodyRes.meshes]) { const ex = n.metadata?.gltf?.extras; if (ex) Object.assign(S.extras, ex); }
+  S.zones = S.extras.ig_zones || []; S.armIdx = new Map(); for (const m of S.meshes) S.armIdx.set(m, m.getIndices().slice());
+  S.itemsById = {};
+  for (const [id, it] of Object.entries(c.items || {})) {
+    const ir = await B.SceneLoader.ImportMeshAsync('', '/item/', id + '.glb', scene);
+    const root = ir.meshes.find(m => m.name === '__root__') || ir.transformNodes[0];
+    root.scaling.setAll(1); if (!root.rotationQuaternion) root.rotationQuaternion = B.Quaternion.Identity();
+    const parts = {}, partRest = {}, sockets = {};
+    for (const m of ir.meshes) { if (/_lod[12]$/.test(m.name)) m.setEnabled(false); else if (m.getTotalVertices && m.getTotalVertices() > 0) { shadowGen.addShadowCaster(m); m.receiveShadows = true; m.alwaysSelectAsActiveMesh = true; } }
+    for (const p of Object.keys(it.parts_def || {})) {
+      const n = [...ir.transformNodes, ...ir.meshes].find(x => x.name === `${id}_${p}`); if (!n) continue;
+      if (!n.rotationQuaternion) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+      parts[p] = n; partRest[p] = { p: n.position.clone(), q: n.rotationQuaternion.clone(), parent: n.parent };
+    }
+    for (const n of [...ir.transformNodes, ...ir.meshes]) if (n.name.startsWith('socket_')) sockets[n.name] = n;
+    root.setEnabled(false);
+    S.itemsById[id] = { root, parts, partRest, sockets, parts_def: it.parts_def || {} };
+  }
+  S.sleeves = {};
+  for (const [id, url] of Object.entries(c.sleeves || {})) {
+    const sr = await B.SceneLoader.ImportMeshAsync('', url.slice(0, url.lastIndexOf('/') + 1), url.slice(url.lastIndexOf('/') + 1), scene);
+    for (const g of sr.animationGroups) { g.stop(); g.dispose(); }
+    const nodes = new Map(); for (const n of [...sr.transformNodes, ...sr.meshes]) if (!nodes.has(n.name)) nodes.set(n.name, n);
+    const ex = {}; for (const n of [...sr.transformNodes, ...sr.meshes]) { const e = n.metadata?.gltf?.extras; if (e) Object.assign(ex, e); }
+    const meshes = sr.meshes.filter(m => m.getTotalVertices && m.getTotalVertices() > 0);
+    for (const m of meshes) { if (/_lod[12]$/.test(m.name)) { m.setEnabled(false); continue; } m.receiveShadows = true; shadowGen.addShadowCaster(m); m.alwaysSelectAsActiveMesh = true; }
+    for (const n of nodes.values()) if (!n.rotationQuaternion && n.rotation) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+    S.sleeves[id] = { nodes, meshes: meshes.filter(m => !/_lod[12]$/.test(m.name)), hide: ex.ig_hide_zones || [], root: sr.meshes[0] };
+    S.sleeves[id].root.setEnabled(false);
+  }
+  S.curSleeve = undefined;
+  // item on attach_hand_r (identity)
+  if (c.item) {
+    const ir = await B.SceneLoader.ImportMeshAsync('', '/item/', 'item.glb', scene);
+    const root = ir.meshes.find(m => m.name === '__root__') || ir.transformNodes[0];
+    root.parent = S.nodes.attach_hand_r; root.scaling.setAll(1);
+    // item local TRS under attach_hand_r = the set's grip transform (meta fp.grip_r; identity = plain Rig.attach)
+    const gr = c.grip_r || { t: [0, 0, 0], r: [0, 0, 0, 1] };
+    root.position = B.Vector3.FromArray(gr.t); root.rotationQuaternion = new B.Quaternion(...gr.r);
+    S.item = root;
+    for (const m of ir.meshes) { if (/_lod[12]$/.test(m.name)) m.setEnabled(false); else if (m.getTotalVertices && m.getTotalVertices() > 0) { shadowGen.addShadowCaster(m); m.receiveShadows = true; m.alwaysSelectAsActiveMesh = true; } }
+    for (const p of Object.keys(c.parts_def || {})) {
+      const n = [...ir.transformNodes, ...ir.meshes].find(x => x.name === `${c.item_id}_${p}`);
+      if (!n) continue;
+      if (!n.rotationQuaternion) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+      S.parts[p] = n; S.partRest[p] = { p: n.position.clone(), q: n.rotationQuaternion.clone(), parent: n.parent };
+    }
+    S.sockets = {}; for (const n of [...ir.transformNodes, ...ir.meshes]) if (n.name.startsWith('socket_')) S.sockets[n.name] = n;
+  }
+  // animation set
+  const ar = await B.SceneLoader.ImportMeshAsync('', '/anim/', 'set.glb', scene);
+  for (const g of scene.animationGroups) {
+    g.stop();
+    const tracks = {};
+    for (const ta of g.targetedAnimations) {
+      const nm = ta.target.name; const t = tracks[nm] = tracks[nm] || {};
+      if (ta.animation.targetProperty === 'rotationQuaternion') t.rot = ta.animation; else if (ta.animation.targetProperty === 'position') t.pos = ta.animation;
+    }
+    S.clips[g.name] = { tracks, from: g.from, to: g.to, fps: (g.targetedAnimations[0] && g.targetedAnimations[0].animation.framePerSecond) || 60 };
+  }
+  for (const m of ar.meshes) if (m.name !== '__root__') m.setEnabled(false);
+  for (const n of ar.transformNodes) n.setEnabled(false);
+  await scene.whenReadyAsync();
+  return { clips: Object.keys(S.clips), bones: Object.keys(S.nodes).length, meshes: S.meshes.map(m => m.name), arm_tris_kept: kept, dropped, parts: Object.keys(S.parts), sockets: Object.keys(S.sockets || {}) };
+};
+
+// engine retarget.ts conversion; unkeyed bones stay at rest (the view-model torso)
+function _poseFrame(name, k) {
+  const C = S.clips[name]; const f = C.from + k * (C.fps / cfg.fps);
+  for (const b of cfg.bones) {
+    const n = S.nodes[b]; if (!n) continue; const t = C.tracks[b];
+    const p = cfg.parents[b]; const ap = (p && S.Ainv[p]) || B.Quaternion.Identity(); const ab = S.A[b];
+    if (t && t.rot) { const q = ap.multiply(t.rot.evaluate(Math.min(f, C.to))).multiply(ab); q.normalize(); n.rotationQuaternion.copyFrom(q); }
+    else n.rotationQuaternion.copyFrom(S.rest[b].q);
+    n.position.copyFrom(S.rest[b].p);
+  }
+  for (const b of cfg.bones) if (S.nodes[b]) S.nodes[b].computeWorldMatrix(true);
+  applyClipState(name, k);
+  applyParts(name, k);
+  applyMorphs(name);
+}
+// corrective shape keys on the arms (e.g. palm_fold_r) from the clip meta: pose.morphs / fp.morphs {target: weight}; others 0
+function applyMorphs(name) {
+  const M = cfg.meta?.[name] || {}; const w = Object.assign({}, M.pose?.morphs || {}, M.fp?.morphs || {});
+  for (const m of S.meshes) {
+    const mm = m.morphTargetManager; if (!mm) continue;
+    for (let i = 0; i < mm.numTargets; i++) { const t = mm.getTarget(i); t.influence = +(w[t.name] || 0); }
+  }
+}
+// hands set: the clip's item (on attach_hand_r at grip_r while the right hand carries it, else where the build
+// put it: world / support hand), and the worn fp_sleeve layer (swapped at sleeve_swap), posed like the arms.
+function setSleeve(id) {
+  if (S.curSleeve === id) return; S.curSleeve = id;
+  for (const [sid, s] of Object.entries(S.sleeves)) s.root.setEnabled(sid === id);
+  const hide = new Set(); if (id && S.sleeves[id]) for (const z of S.sleeves[id].hide) { const i = S.zones.indexOf(z); if (i >= 0) hide.add(i); }
+  for (const m of S.meshes) {
+    const idx = S.armIdx.get(m); const uv2 = m.getVerticesData(B.VertexBuffer.UV2Kind);
+    if (!hide.size || !uv2) { m.setIndices(idx); continue; }
+    const kept = [];
+    for (let i = 0; i < idx.length; i += 3) { const z = [0, 1, 2].map(q => Math.floor(uv2[idx[i + q] * 2])); if (z.every(q => hide.has(q))) continue; kept.push(idx[i], idx[i + 1], idx[i + 2]); }
+    m.setIndices(kept);
+  }
+}
+function applyClipState(name, k) {
+  const cc = (cfg.clipcfg || {})[name]; if (!cc) return;
+  for (const it of Object.values(S.itemsById)) it.root.setEnabled(false);
+  S.item = null; S.parts = {}; S.partRest = {}; S.sockets = {};
+  if (cc.item && S.itemsById[cc.item]) {
+    const it = S.itemsById[cc.item]; it.root.setEnabled(true);
+    S.item = it.root; S.parts = it.parts; S.partRest = it.partRest; S.sockets = it.sockets; cfg.parts_def = it.parts_def;
+    const tr = cc.track[Math.min(k, cc.track.length - 1)];
+    if (tr.h === 'r') {
+      const gr = cc.grip_r || { t: [0, 0, 0], r: [0, 0, 0, 1] };
+      it.root.parent = S.nodes.attach_hand_r; it.root.position = B.Vector3.FromArray(gr.t); it.root.rotationQuaternion = new B.Quaternion(...gr.r);
+    } else {
+      it.root.parent = null; it.root.position = B.Vector3.FromArray(tr.t); it.root.rotationQuaternion = new B.Quaternion(...tr.r);
+    }
+    if (tr.h === 'gone') it.root.setEnabled(false);   // released (thrown): hidden from the release frame on
+    it.root.computeWorldMatrix(true);
+  }
+  for (const pr of (cc.props || [])) {   // clip props (secondary items): per-frame transform from the build, null = hidden
+    const it = S.itemsById[pr.id]; if (!it) continue;
+    const T = pr.track[Math.min(k, pr.track.length - 1)];
+    if (!T) { it.root.setEnabled(false); continue; }
+    it.root.setEnabled(true); it.root.parent = null; it.root.position = B.Vector3.FromArray(T.t); it.root.rotationQuaternion = new B.Quaternion(...T.r);
+    for (const [p, n] of Object.entries(it.parts)) {
+      const d = it.parts_def[p], r = it.partRest[p], vs = (pr.parts || {})[p]; const v = vs ? vs[Math.min(k, vs.length - 1)] : 0;
+      const ax = B.Vector3.FromArray(d.axis).normalize();
+      if (d.move === 'rotate') { n.position.copyFrom(r.p); n.rotationQuaternion = B.Quaternion.RotationAxis(ax, d.angle_deg * Math.PI / 180 * v).multiply(r.q); }
+      else { n.position = r.p.add(ax.scale((d.travel_m || 0) * v)); n.rotationQuaternion = r.q.clone(); }
+      n.computeWorldMatrix(true);
+    }
+    it.root.computeWorldMatrix(true);
+  }
+  if (cc.sleeves && cc.sleeves.length) {
+    let id = null; for (const [f0, sid] of cc.sleeves) if (k >= f0) id = sid;
+    setSleeve(id);
+    const s = S.sleeves[id];
+    if (s) for (const b of cfg.bones) { const a = S.nodes[b], t = s.nodes.get(b); if (!a || !t) continue; t.rotationQuaternion.copyFrom(a.rotationQuaternion); t.position.copyFrom(a.position); t.computeWorldMatrix(true); }
+  } else setSleeve(null);
+}
+function applyParts(name, k) {
+  const M = (cfg.meta[name] || {}).fp; if (!M || !S.item) return;
+  for (const [p, n] of Object.entries(S.parts)) {
+    const d = cfg.parts_def[p]; const r = S.partRest[p];
+    const v = M.parts?.[p] ? M.parts[p].values[Math.min(k, M.parts[p].values.length - 1)] : (M.state_in?.[p] ?? 0);
+    const cw = (M.carry || []).find(w => w.part === p && k >= w.frames[0] && k <= w.frames[1]);
+    if (cw) {
+      n.parent = S.nodes[cw.attach]; n.position = B.Vector3.FromArray(cw.offset.t); n.rotationQuaternion = new B.Quaternion(...cw.offset.r);
+    } else {
+      n.parent = r.parent;
+      const ax = B.Vector3.FromArray(d.axis).normalize();
+      if (d.move === 'rotate') { n.position.copyFrom(r.p); n.rotationQuaternion = B.Quaternion.RotationAxis(ax, d.angle_deg * Math.PI / 180 * v).multiply(r.q); }
+      else if (d.move === 'rotate_then_translate') {   // bolt: v 0..0.5 turn, 0.5..1 slide along then_axis
+        const ta = B.Vector3.FromArray(d.then_axis || d.axis).normalize();
+        n.position = r.p.add(ta.scale(d.travel_m * Math.max(0, 2 * v - 1)));
+        n.rotationQuaternion = B.Quaternion.RotationAxis(ax, d.angle_deg * Math.PI / 180 * Math.min(1, 2 * v)).multiply(r.q);
+      }
+      else { n.position = r.p.add(ax.scale(d.travel_m * v)); n.rotationQuaternion = r.q.clone(); }
+    }
+    const vis = M.visible?.[p] ? M.visible[p][Math.min(k, M.visible[p].length - 1)] : 1;
+    n.setEnabled(!!vis);
+    n.computeWorldMatrix(true);
+  }
+}
+window.poseFrame = (n, k) => { _poseFrame(n, k); return true; };
+window.frames = name => { const C = S.clips[name]; return Math.round((C.to - C.from) / (C.fps / cfg.fps)) + 1; };
+window.probe = () => {
+  const out = {};
+  if (S.item) { S.item.computeWorldMatrix(true); const s = new B.Vector3(), q = new B.Quaternion(), t = new B.Vector3(); S.item.getWorldMatrix().decompose(s, q, t); out.item = { p: t.asArray(), q: [q.x, q.y, q.z, q.w] }; }
+  for (const b of ['attach_hand_r', 'attach_hand_l', 'hand_r', 'hand_l']) {
+    const n = S.nodes[b]; if (!n) continue; n.computeWorldMatrix(true);
+    const s = new B.Vector3(), q = new B.Quaternion(), t = new B.Vector3(); n.getWorldMatrix().decompose(s, q, t);
+    out[b] = { p: t.asArray(), q: [q.x, q.y, q.z, q.w] };
+  }
+  if (S.item && S.sockets?.socket_muzzle) { S.sockets.socket_muzzle.computeWorldMatrix(true); out.muzzle = S.sockets.socket_muzzle.getAbsolutePosition().asArray(); }
+  for (const [p, n] of Object.entries(S.parts)) { n.computeWorldMatrix(true); out['part_' + p] = n.getAbsolutePosition().asArray(); }
+  return out;
+};
+
+function makeCam(pos, target, fovDeg, minZ = 0.01) {
+  if (cam) cam.dispose();
+  cam = new B.UniversalCamera('cam', pos, scene); cam.setTarget(target); cam.minZ = minZ; cam.maxZ = 200; cam.fov = fovDeg * Math.PI / 180;
+  cam.fovMode = B.Camera.FOVMODE_VERTICAL_FIXED; scene.activeCamera = cam; return cam;
+}
+async function render() { scene.render(); scene.render(); return engine.getRenderingCanvas().toDataURL('image/png'); }
+function hud(ctx, W, H, lines, events) {
+  ctx.strokeStyle = 'rgba(240,235,220,0.55)'; ctx.lineWidth = 1;   // screen centre (crosshair) and 4:3 safe frame
+  ctx.beginPath(); ctx.moveTo(W / 2 - 8, H / 2); ctx.lineTo(W / 2 + 8, H / 2); ctx.moveTo(W / 2, H / 2 - 8); ctx.lineTo(W / 2, H / 2 + 8); ctx.stroke();
+  const w43 = H * 4 / 3; ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(224,160,48,0.6)'; ctx.strokeRect((W - w43) / 2, 1, w43, H - 2); ctx.setLineDash([]);
+  ctx.font = `${Math.round(H / 24)}px monospace`; ctx.fillStyle = '#f0ead8';
+  lines.forEach((l, i) => ctx.fillText(l, 12, 12 + (i + 1) * H / 22));
+  if (events?.length) { ctx.fillStyle = '#ffb040'; ctx.fillText(events.join(' '), 12, H - 14); }
+}
+async function withHud(url, lines, events) {
+  const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = url; });
+  const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; const x = cv.getContext('2d');
+  x.drawImage(img, 0, 0); hud(x, img.width, img.height, lines, events); return cv.toDataURL('image/png');
+}
+// the player's view: camera at E0 looking +Z at the view-model FOV
+window.shootEye = async (name, k, fov, labels) => {
+  _poseFrame(name, k);
+  const E = B.Vector3.FromArray(cfg.eye);
+  makeCam(E, E.add(new B.Vector3(0, 0, 1)), fov || cfg.fov, cfg.near);
+  return await withHud(await render(), labels?.lines || [], labels?.events || []);
+};
+// hand close-up (pose library, grip detail): orbit the hand joint
+window.shootHand = async (name, k, side, view) => {
+  _poseFrame(name, k);
+  const h = S.nodes['hand_' + side].getAbsolutePosition(), m = S.nodes['middle_02_' + side].getAbsolutePosition();
+  const c = h.add(m).scale(0.5);
+  const sgn = side === 'l' ? 1 : -1;   // +X = the character's left
+  const dirs = { palm: new B.Vector3(-sgn * 1, 0.1, 0.25), back: new B.Vector3(sgn * 1, 0.2, -0.15), front: new B.Vector3(0, 0.1, 1), top: new B.Vector3(0.001, 1, 0.1), eye: null,
+    // 3/4 views for the pose library (hand hangs, fingers down): palm34 looks up into the palm from the fingertip side (judges a cup's hollow), thumb34 = palm + thumb side
+    palm34: new B.Vector3(-sgn * 0.8, -0.85, 0.3), thumb34: new B.Vector3(-sgn * 0.7, -0.15, 0.75) };
+  let pos;
+  if (view === 'eye') pos = B.Vector3.FromArray(cfg.eye); else pos = c.add(dirs[view].normalize().scale(0.34));
+  makeCam(pos, c, view === 'eye' ? 30 : 34, 0.01);
+  return await render();
+};
+// third-person-ish look at the whole view-model rig from beside the head (checks the arms off-camera)
+window.shootSide = async (name, k) => {
+  _poseFrame(name, k);
+  const E = B.Vector3.FromArray(cfg.eye);
+  makeCam(E.add(new B.Vector3(-1.1, 0.25, 0.25)), E.add(new B.Vector3(-0.05, -0.2, 0.25)), 40, 0.05);
+  return await render();
+};
+
+window.sheet = async (items, cols, title, scale = 0.5) => {
+  const imgs = await Promise.all(items.map(it => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = it.url; })));
+  const w = imgs[0].width, h = imgs[0].height, cw = w * scale, ch = h * scale, pad = 24;
+  const rows = Math.ceil(imgs.length / cols);
+  const cv = document.createElement('canvas'); cv.width = cw * cols; cv.height = rows * (ch + pad) + 36;
+  const x = cv.getContext('2d'); x.fillStyle = '#1b1c1c'; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = '#e6e2d6'; x.font = '17px monospace'; x.fillText(title, 10, 24);
+  imgs.forEach((im, i) => {
+    const cx = (i % cols) * cw, cy = 36 + Math.floor(i / cols) * (ch + pad);
+    x.fillStyle = '#e0a030'; x.font = '13px monospace'; x.fillText(items[i].name, cx + 6, cy + 17);
+    x.drawImage(im, cx, cy + pad, cw, ch);
+  });
+  return cv.toDataURL('image/png');
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,411 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>asset review harness</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script src="/tools/node_modules/babylonjs/babylon.js"></script>
+<script src="/tools/node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Review harness for game-asset-modeling. Driven by shoot.mjs through window.boot / window.shoot.
+// Right-handed scene so Babylon coordinates == glTF coordinates (+Y up, asset front faces +Z).
+const B = BABYLON;
+let engine, scene, cfg, cam, shadowGen, sun;
+const S = { lods: {}, cols: [], other: [], sockets: [], states: [], broken: [], all: [], bbox: null, extras: {}, texW: {} };
+
+const hex = (h, a = 1) => { h = h.replace('#', ''); return new B.Color4(...[0, 2, 4].map(i => parseInt(h.substr(i, 2), 16) / 255), a); };
+const hex3 = h => { const c = hex(h); return new B.Color3(c.r, c.g, c.b); };
+
+function classify(node) {
+  // look at the whole ancestor chain: state/broken/collider membership beats LOD naming
+  const chain = []; for (let n = node; n; n = n.parent) chain.push(n.name || '');
+  if (chain.some(nm => /_col(_walk|_\d\d)?$/.test(nm))) return ['col'];
+  if (chain.some(nm => /_sabotaged$/.test(nm))) return ['state'];
+  if (chain.some(nm => /_broken$/.test(nm))) return ['broken'];
+  if (chain.some(nm => /^socket_/.test(nm))) return ['socket'];
+  for (const nm of chain) { const m = nm.match(/_lod(\d+)$/); if (m) return ['lod', +m[1]]; }
+  return ['other'];
+}
+
+window.boot = async (c) => {
+  cfg = c;
+  const canvas = document.getElementById('c');
+  canvas.width = c.w; canvas.height = c.h; canvas.style.width = c.w + 'px'; canvas.style.height = c.h + 'px';
+  engine = new B.Engine(canvas, true, { preserveDrawingBuffer: true, antialias: true, stencil: true });
+  scene = new B.Scene(engine);
+  scene.useRightHandedSystem = true;
+  const R = c.review;
+  scene.clearColor = hex(R.background);
+  scene.ambientColor = new B.Color3(0, 0, 0);
+  const ip = scene.imageProcessingConfiguration;
+  ip.toneMappingEnabled = true; ip.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES; ip.exposure = R.exposure ?? 1.0;
+  const env = new B.HDRCubeTexture(c.hdri, scene, 256, false, true, false, true);
+  await new Promise(res => { if (env.isReady()) res(); else env.onLoadObservable.addOnce(res); setTimeout(res, 8000); });
+  scene.environmentTexture = env; scene.environmentIntensity = 1.0;
+  if (R.fog) { scene.fogMode = B.Scene.FOGMODE_LINEAR; scene.fogStart = R.fog.start; scene.fogEnd = R.fog.end; scene.fogColor = hex3(R.fog.color); }
+  // one soft directional for form (overcast: low intensity, blurred shadows)
+  sun = new B.DirectionalLight('sun', new B.Vector3(-0.35, -1, -0.45), scene);
+  sun.intensity = 0.9; sun.position = new B.Vector3(20, 40, 25);
+  shadowGen = new B.ShadowGenerator(2048, sun);
+  shadowGen.usePercentageCloserFiltering = true; shadowGen.filteringQuality = B.ShadowGenerator.QUALITY_HIGH;
+  shadowGen.bias = 0.0015; shadowGen.normalBias = 0.02; shadowGen.darkness = 0.45;
+
+  const ground = B.MeshBuilder.CreateGround('__ground', { width: 400, height: 400 }, scene);
+  const gm = new B.PBRMaterial('__groundMat', scene); gm.albedoColor = hex3(R.ground); gm.metallic = 0; gm.roughness = 1;
+  ground.material = gm; ground.receiveShadows = true; ground.position.y = -0.001;
+
+  const res = await B.SceneLoader.ImportMeshAsync('', '/asset/', 'asset.glb', scene);
+  const extras = {};
+  for (const n of [...scene.transformNodes, ...scene.meshes]) {
+    const ex = n.metadata && n.metadata.gltf && n.metadata.gltf.extras;
+    if (ex && Object.keys(ex).length) extras[n.name] = ex;
+  }
+  S.extras = extras;
+  for (const m of res.meshes) {
+    if (!m.getTotalVertices || m.getTotalVertices() === 0) continue;
+    const [kind, arg] = classify(m);
+    S.all.push(m);
+    if (kind === 'lod') (S.lods[arg] = S.lods[arg] || []).push(m);
+    else if (kind === 'col') S.cols.push(m);
+    else if (kind === 'state') S.states.push(m);
+    else if (kind === 'broken') S.broken.push(m);
+    else S.other.push(m);
+    m.receiveShadows = true;
+  }
+  // context assets (--with): only their LOD0 is shown, in every view, and they count for framing
+  S.context = [];
+  for (const [wi, url] of (c.with || []).entries()) {
+    const r2 = await B.SceneLoader.ImportMeshAsync('', url.slice(0, url.lastIndexOf('/') + 1), url.slice(url.lastIndexOf('/') + 1), scene);
+    const xf = (c.withXf || [])[wi];
+    if (xf && r2.meshes[0]) {                 // place the context asset (glTF axes; rotation about +Y)
+      r2.meshes[0].position = B.Vector3.FromArray(xf.offset);
+      if (xf.rotY) { r2.meshes[0].rotationQuaternion = null; r2.meshes[0].rotation = new B.Vector3(0, xf.rotY * Math.PI / 180, 0); }
+      r2.meshes[0].computeWorldMatrix(true);
+    }
+    for (const m of r2.meshes) {
+      if (!m.getTotalVertices || m.getTotalVertices() === 0) continue;
+      const [kind, arg] = classify(m);
+      if (kind === 'lod' && arg !== 0) { m.setEnabled(false); continue; }
+      if (kind === 'col') { m.setEnabled(false); continue; }
+      m.receiveShadows = true; S.context.push(m);
+    }
+  }
+  for (const n of scene.transformNodes) if (/^socket_/.test(n.name)) S.sockets.push(n);
+  // texture widths per material (for uv_density)
+  for (const m of S.all) {
+    const mat = m.material; if (!mat) continue;
+    const t = mat.albedoTexture; if (t && t.getSize) S.texW[mat.name] = t.getSize().width;
+  }
+  // mannequin: capsule of reference height beside the asset
+  setVisible('default');
+  S.bbox = bounds(visibleRender());
+  shadowGen.normalBias = Math.min(0.02, Math.max(0.002, S.bbox.size.length() * 0.004));   // small props: less peter-panning
+  const H = R.mannequin_height || 1.75;
+  const man = B.MeshBuilder.CreateCapsule('__mannequin', { height: H, radius: 0.2, tessellation: 24 }, scene);
+  const mm = new B.PBRMaterial('__manMat', scene); mm.albedoColor = hex3('#7C7F7D'); mm.roughness = 0.9; mm.metallic = 0;
+  man.material = mm; man.position = new B.Vector3(S.bbox.max.x + 0.5, H / 2, S.bbox.center.z);
+  shadowGen.addShadowCaster(man);
+  S.man = man;
+  for (const m of S.all.concat(S.context)) shadowGen.addShadowCaster(m);
+  await scene.whenReadyAsync();
+  return stats();
+};
+
+function visibleRender() { return (S.lods[0] || []).concat(S.other, S.context || []); }
+function bounds(meshes) {
+  let min = new B.Vector3(1e9, 1e9, 1e9), max = new B.Vector3(-1e9, -1e9, -1e9);
+  for (const m of meshes) { m.computeWorldMatrix(true); m.refreshBoundingInfo(); const bb = m.getBoundingInfo().boundingBox;
+    min = B.Vector3.Minimize(min, bb.minimumWorld); max = B.Vector3.Maximize(max, bb.maximumWorld); }
+  if (min.x > max.x) { min = B.Vector3.Zero(); max = B.Vector3.One(); }
+  return { min, max, center: min.add(max).scale(0.5), size: max.subtract(min) };
+}
+
+function setVisible(mode) {
+  for (const m of S.all) { m.isVisible = false; m.visibility = 1; }
+  (S.lods[0] || []).forEach(m => m.isVisible = true);
+  S.other.forEach(m => m.isVisible = true);
+  if (mode === 'collision') { (S.lods[0] || []).forEach(m => m.visibility = 0.25); S.cols.forEach(m => m.isVisible = true); }
+  if (mode === 'sabotaged') { (S.lods[0] || []).forEach(m => m.isVisible = false); S.states.forEach(m => m.isVisible = true); }
+  if (mode === 'broken') { (S.lods[0] || []).forEach(m => m.isVisible = false); S.broken.forEach(m => m.isVisible = true); }
+}
+
+function makeCam(type, pos, target, fov = 0.75, orthoHalf = null) {
+  if (cam) cam.dispose();
+  cam = new B.UniversalCamera('cam', pos, scene);
+  cam.setTarget(target); cam.minZ = 0.02; cam.maxZ = 2000; cam.fov = fov;
+  if (orthoHalf) {
+    cam.mode = B.Camera.ORTHOGRAPHIC_CAMERA;
+    const a = engine.getRenderWidth() / engine.getRenderHeight();
+    let hw = orthoHalf.w, hh = orthoHalf.h;
+    if (hw / hh > a) hh = hw / a; else hw = hh * a;
+    cam.orthoLeft = -hw; cam.orthoRight = hw; cam.orthoTop = hh; cam.orthoBottom = -hh;
+  }
+  scene.activeCamera = cam;
+  scene.fogEnabled = !orthoHalf && !!cfg.review.fog;
+  return cam;
+}
+
+const dir = (az, el) => new B.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+const rad = d => d * Math.PI / 180;
+
+function frameBoth() { // asset + mannequin (+ density reference when shown)
+  const b = S.bbox, mb = bounds(S.ref ? [S.man, S.ref] : [S.man]);
+  const min = B.Vector3.Minimize(b.min, mb.min), max = B.Vector3.Maximize(b.max, mb.max);
+  return { min, max, center: min.add(max).scale(0.5), size: max.subtract(min) };
+}
+
+async function render() { await scene.whenReadyAsync(); scene.render(); scene.render(); return engine.getRenderingCanvas().toDataURL('image/png'); }
+
+const edgeOn = [];
+function edges(meshes, on) {
+  for (const m of meshes) { if (on) { m.enableEdgesRendering(0.9999); m.edgesWidth = 1.2; m.edgesColor = new B.Color4(0.05, 0.05, 0.05, 1); edgeOn.push(m); } else m.disableEdgesRendering(); }
+}
+
+let checkerMat = null, saved = new Map();
+function checker(on) {
+  const target = cfg.target_density;
+  if (on) {
+    for (const m of visibleRender()) {
+      saved.set(m, m.material);
+      const w = (m.material && S.texW[m.material.name]) || 1024;
+      const tex = new B.DynamicTexture('chk', { width: 1024, height: 1024 }, scene, true);
+      const ctx = tex.getContext(); const cells = 16, s = 1024 / cells;
+      for (let i = 0; i < cells; i++) for (let j = 0; j < cells; j++) { ctx.fillStyle = (i + j) % 2 ? '#d8d8d0' : '#50504c'; ctx.fillRect(i * s, j * s, s, s); }
+      tex.update();
+      tex.uScale = w / 1024; tex.vScale = w / 1024; tex.coordinatesIndex = 0;
+      tex.wrapU = tex.wrapV = B.Texture.WRAP_ADDRESSMODE;   // DynamicTexture clamps by default: tiling (world-metre) UVs showed as stripes
+      const pm = new B.PBRMaterial('chkMat', scene); pm.albedoTexture = tex; pm.metallic = 0; pm.roughness = 1; pm.backFaceCulling = false;
+      m.material = pm;
+    }
+    // reference cube: cells = 64 texels at the target density
+    const cell = 64 / target, size = Math.max(cell * 4, 0.12);
+    const ref = B.MeshBuilder.CreateBox('__densityRef', { size }, scene);
+    const tex = new B.DynamicTexture('chkref', { width: 512, height: 512 }, scene, true); const ctx = tex.getContext();
+    const n = Math.round(size / cell), px = 512 / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { ctx.fillStyle = (i + j) % 2 ? '#d8d8d0' : '#50504c'; ctx.fillRect(i * px, j * px, px, px); }
+    tex.update();
+    const rm = new B.PBRMaterial('refMat', scene); rm.albedoTexture = tex; rm.metallic = 0; rm.roughness = 1; ref.material = rm;
+    const mb = bounds([S.man]);
+    ref.position = new B.Vector3(mb.max.x + size / 2 + 0.15, size / 2, S.bbox.center.z);
+    S.ref = ref;
+  } else {
+    for (const [m, mat] of saved) m.material = mat; saved.clear();
+    if (S.ref) { S.ref.dispose(); S.ref = null; }
+  }
+}
+
+let colMat = null;
+// Kit/context review: tile the asset cols x rows at its real placement height on a grey
+// stand-in block, so seams, repetition and real viewing angles can be judged.
+// c = {tile:[cols, rows], elevation: m, base: true, gap: 0}. Module size = bbox of lod0.
+window.buildContext = async (c) => {
+  const b = S.bbox, w = b.size.x, h = b.size.y;
+  const [cols, rows] = c.tile || [3, 1];
+  const top = S.lods[0][0].parent ? (function r(n) { return n.parent && n.parent.name !== '__root__' ? r(n.parent) : n; })(S.lods[0][0]) : S.lods[0][0];
+  const root = top.parent || top;
+  const clones = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    if (i === 0 && j === 0) continue;
+    const cl = root.instantiateHierarchy(null, { doNotInstantiate: true });
+    // plane 'ground': tile flat (x, z) for floor/ground pieces; default: stack up (x, y) for facades
+    const step = c.plane === 'ground' ? new B.Vector3(i * (w + (c.gap || 0)), 0, -j * (b.size.z + (c.gap || 0)))
+                                      : new B.Vector3(i * (w + (c.gap || 0)), j * h, 0);
+    cl.position = root.position.add(step); clones.push(cl);
+  }
+  root.position.y += c.elevation || 0; clones.forEach(cl => cl.position.y += c.elevation || 0);
+  for (const cl of clones) for (const m of cl.getChildMeshes(false)) {
+    const [kind, arg] = classify(m);
+    m.isVisible = (kind === 'lod' && arg === 0) || kind === 'other';
+    if (m.isVisible) { shadowGen.addShadowCaster(m); m.receiveShadows = true; }
+  }
+  if (c.base !== false && c.elevation) {
+    const blk = B.MeshBuilder.CreateBox('__base', { width: cols * w, height: c.elevation, depth: b.size.z }, scene);
+    blk.position = new B.Vector3(b.min.x + cols * w / 2, c.elevation / 2, b.center.z);
+    const bm = new B.PBRMaterial('__baseMat', scene); bm.albedoColor = hex3('#3F403E'); bm.roughness = 0.95; bm.metallic = 0;
+    blk.material = bm; blk.receiveShadows = true; shadowGen.addShadowCaster(blk); S.base = blk;
+  }
+  const all = [...visibleRender(), ...clones.flatMap(cl => cl.getChildMeshes(false).filter(m => m.isVisible)), ...(S.base ? [S.base] : [])];
+  S.bbox = bounds(all);
+  S.man.position = new B.Vector3(S.bbox.max.x + 0.6, S.man.position.y, S.bbox.max.z + 1.5);
+  S.tiled = true;
+  return { bbox: [S.bbox.min.asArray(), S.bbox.max.asArray()], clones: clones.length };
+};
+
+// Held items (weapons, tools): lift to hand height and frame the item alone.
+// h = {lift: 1.02, grip: 'pistol_grip'|'fist'|'pinch'|'pickup', hands: 1|2}
+window.liftAsset = async (h) => {
+  const top = scene.getTransformNodeByName('__root__') || scene.getMeshByName('__root__');
+  top.position.y += h.lift || 0; top.computeWorldMatrix(true);
+  for (const m of scene.meshes) m.computeWorldMatrix(true);
+  S.bbox = bounds(visibleRender()); S.held = h;
+  S.man.position.x = S.bbox.max.x + 0.35; S.man.position.z = S.bbox.center.z;
+  return { bbox: [S.bbox.min.asArray(), S.bbox.max.asArray()] };
+};
+window.shootHeld = async (v) => {
+  const h = S.held || { lift: 0, grip: 'pistol_grip', hands: 1 };
+  setVisible('default'); S.man.isVisible = false;
+  const b = bounds(visibleRender()); const c = b.center; const sz = b.size;
+  const O = new B.Vector3(0, h.lift || 0, 0);
+  const ortho = (pos, half) => makeCam('o', pos, c, 0.75, half);
+  if (v === 'item_side_l') ortho(new B.Vector3(c.x + 20, c.y, c.z), { w: sz.z / 2 * 1.1, h: sz.y / 2 * 1.1 });
+  else if (v === 'item_side_r') ortho(new B.Vector3(c.x - 20, c.y, c.z), { w: sz.z / 2 * 1.1, h: sz.y / 2 * 1.1 });
+  else if (v === 'item_top') makeCam('o', new B.Vector3(c.x, c.y + 20, c.z + 0.0001), c, 0.75, { w: sz.x / 2 * 1.1, h: sz.z / 2 * 1.1 });
+  else if (v === 'item_front') ortho(new B.Vector3(c.x, c.y, c.z + 20), { w: sz.x / 2 * 1.1, h: sz.y / 2 * 1.1 });
+  else {  // fp / fp_close: view-model camera looking along +Z, item lower right (camera right = -X here)
+    let off = h.grip === 'pistol_grip' ? (h.hands === 2 ? [0.12, 0.13, -0.16] : [0.17, 0.12, -0.32])
+            : h.grip === 'pinch' ? [0.06, 0.14, -0.30] : [0.13, 0.13, -0.38];
+    if (v === 'fp_close') off = [off[0] * 0.55, off[1] * 0.6, off[2] * 0.55];
+    const pos = O.add(B.Vector3.FromArray(off));
+    let tgt = pos.add(new B.Vector3(h.grip === 'pistol_grip' && h.hands === 1 ? -0.16 : -0.1, h.grip === 'fist' ? 0.12 : -0.14, 1));
+    if (h.grip === 'pinch') tgt = pos.add(new B.Vector3(-0.1, -0.25, 1));
+    makeCam('p', pos, tgt, 0.85); cam.minZ = 0.01;
+  }
+  return { url: await render(), note: '' };
+};
+
+window.shootFocus = async (f) => {
+  // close-up on one region: f = {center:[x,y,z] glTF, radius, az, el, mode, lod}
+  setVisible(f.mode || 'default'); S.man.isVisible = false;
+  if (f.lod !== undefined && f.lod > 0) { (S.lods[0] || []).forEach(m => m.isVisible = false); (S.lods[f.lod] || []).forEach(m => m.isVisible = true); }
+  const c = B.Vector3.FromArray(f.center); const fov = 0.5;
+  const d = dir(rad(f.az ?? -35), rad(f.el ?? 15));
+  makeCam('p', c.add(d.scale(f.radius / Math.sin(fov / 2))), c, fov);
+  return { url: await render(), note: '' };
+};
+
+window.shoot = async (view) => {
+  const R = cfg.review; const b = S.bbox; const c = b.center;
+  const r = Math.max(b.size.length() / 2, 0.15);
+  setVisible(view === 'collision' ? 'collision' : view === 'sabotaged' ? 'sabotaged' : view === 'broken' ? 'broken' : 'default');
+  S.man.isVisible = !['lods', 'feed'].includes(view);
+  let post = null;
+  if (view === 'uv_density') checker(true);
+  const night = view === 'night';
+  if (night) { scene.environmentIntensity = 0.04; sun.intensity = 0.02; scene.clearColor = hex('#101214'); if (scene.fogEnabled !== undefined) scene.fogColor = hex3('#101214'); }
+  const exploded = [];
+  if (view === 'broken') { // spread pieces outward from the asset center so each chunk reads
+    const cc = S.bbox.center;
+    for (const m of S.broken) { const n = m.parent && /_broken_\d+$/.test(m.parent.name) ? m.parent : m;
+      if (exploded.includes(n) || /_col$/.test(n.name)) continue; exploded.push(n); n._op = n.position.clone();
+      const w = n.getAbsolutePosition().subtract(cc); w.y = Math.max(w.y, 0) * 0.4; n.position.addInPlace(w.scale(0.9)); }
+    S.broken.forEach(m => { if (/_col$/.test(m.name)) m.isVisible = false; });
+  }
+  if (view === 'front') {
+    const f = frameBoth();
+    makeCam('o', new B.Vector3(f.center.x, f.center.y, f.max.z + 50), f.center, 0.75, { w: f.size.x / 2 * 1.12, h: f.size.y / 2 * 1.12 });
+  } else if (view === 'side') {
+    const f = frameBoth();
+    makeCam('o', new B.Vector3(f.max.x + 50, f.center.y, f.center.z), f.center, 0.75, { w: f.size.z / 2 * 1.12, h: f.size.y / 2 * 1.12 });
+  } else if (view === 'back') {
+    const f = frameBoth();
+    makeCam('o', new B.Vector3(f.center.x, f.center.y, f.min.z - 50), f.center, 0.75, { w: f.size.x / 2 * 1.12, h: f.size.y / 2 * 1.12 });
+  } else if (view === 'top') {
+    const f = frameBoth(); makeCam('o', new B.Vector3(f.center.x, f.max.y + 50, f.center.z + 0.001), f.center, 0.75, { w: f.size.x / 2 * 1.12, h: f.size.z / 2 * 1.12 });
+  } else if (['three_quarter', 'sabotaged', 'broken', 'collision', 'uv_density', 'night'].includes(view)) {
+    let f = frameBoth();
+    if (view === 'broken') { const e = bounds(S.broken.filter(m => !/_col$/.test(m.name)).concat([S.man])); f = e; } const rr = Math.max(f.size.length() / 2, 0.2); const fov = 0.6;
+    const d = dir(rad(-35), rad(22)); makeCam('p', f.center.add(d.scale(rr / Math.sin(fov / 2) * 1.05)), f.center, fov);
+  } else if (view === 'street') {
+    const eye = cfg.eye_height; const fov = 1.1;
+    const pos = new B.Vector3(c.x - b.size.x * 0.15, eye, b.max.z + Math.max(6, b.size.y * 0.55));  // fronts face +Z
+    makeCam('p', pos, new B.Vector3(c.x, c.y, c.z), fov);
+  } else if (view === 'eye') {
+    const eye = cfg.eye_height; const fov = 1.0;
+    const dist = Math.max(2.2, r / Math.tan(fov / 2) * 1.15);
+    const d = dir(rad(-20), 0);
+    const pos = new B.Vector3(c.x + d.x * dist, eye, c.z + d.z * dist);
+    makeCam('p', pos, new B.Vector3(c.x, Math.min(Math.max(c.y, 0.9), eye + dist * 0.6), c.z), fov);
+  } else if (view === 'iso' || view === 'iso_context') {
+    const iso = R.iso || { elevation_deg: 50, azimuth_deg: 45 };
+    const d = dir(rad(iso.azimuth_deg), rad(iso.elevation_deg));
+    const f = frameBoth();
+    const half = view === 'iso' ? Math.max(f.size.length() / 2, 0.3) * 1.1 : (R.iso_context_width_m || 40) / 2;
+    makeCam('o', f.center.add(d.scale(200)), f.center, 0.75, { w: half, h: half });
+  } else if (view === 'feed') {
+    const F = R.feed; const d = dir(rad(-25), 0);
+    const pos = new B.Vector3(c.x + d.x * F.distance, F.mount_height, c.z + d.z * F.distance);
+    makeCam('p', pos, c, 0.9);
+    post = F;
+  } else if (view === 'lods') {
+    const keys = Object.keys(S.lods).map(Number).sort();
+    const gap = b.size.x * 1.25 + 0.2; const moved = [];
+    keys.forEach((k, i) => (S.lods[k] || []).forEach(m => { m.isVisible = true; const n = m.parent && /_lod\d+$/.test(m.parent.name) ? m.parent : m; if (!moved.includes(n)) { moved.push(n); n._ox = n.position.x; n.position.x += i * gap; } }));
+    edges(keys.flatMap(k => S.lods[k]), true);
+    const tot = bounds(keys.flatMap(k => S.lods[k]));
+    const fov = 0.6; const d = dir(rad(-20), rad(18)); const rr = Math.max(tot.size.length() / 2, 0.2);
+    makeCam('p', tot.center.add(d.scale(rr / Math.sin(fov / 2) * 1.05)), tot.center, fov);
+    const url = await render();
+    edges(keys.flatMap(k => S.lods[k]), false); moved.forEach(n => n.position.x = n._ox);
+    return { url, note: 'LODs ' + keys.join(', ') + ' left to right' };
+  }
+  if (view === 'collision') {
+    if (!colMat) { colMat = new B.StandardMaterial('__col', scene); colMat.emissiveColor = new B.Color3(1, 0.45, 0.1); colMat.disableLighting = true; colMat.wireframe = true; }
+    S.cols.forEach(m => { m._savedMat = m._savedMat || m.material; m.material = colMat; });
+  }
+  let url;
+  if (post) {
+    const W = engine.getRenderWidth(), H = engine.getRenderHeight();
+    engine.setSize(post.res[0], post.res[1]);
+    makeCam('p', cam.position.clone(), c, 0.9);
+    const small = await render();
+    engine.setSize(W, H);
+    url = await feedTreatment(small, W, H, post);
+  } else url = await render();
+  if (view === 'uv_density') checker(false);
+  if (night) { scene.environmentIntensity = 1.0; sun.intensity = 0.9; scene.clearColor = hex(cfg.review.background); if (cfg.review.fog) scene.fogColor = hex3(cfg.review.fog.color); }
+  exploded.forEach(n => n.position.copyFrom(n._op));
+  return { url, note: view === 'broken' ? exploded.length + ' pieces, spread apart' : '' };
+};
+
+async function feedTreatment(src, W, H, F) {
+  const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = src; });
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
+  x.imageSmoothingEnabled = true; x.drawImage(img, 0, 0, W, H);
+  const d = x.getImageData(0, 0, W, H); const t = hex3(F.tint || '#9FC7A8');
+  for (let i = 0; i < d.data.length; i += 4) {
+    const l = (0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]) / 255;
+    const row = Math.floor(i / 4 / W); const sl = F.scanlines && (row % 4 < 2) ? 0.86 : 1;
+    const n = (Math.random() - 0.5) * 0.06;
+    d.data[i] = 255 * Math.min(1, (l * t.r + n) * sl); d.data[i + 1] = 255 * Math.min(1, (l * t.g + n) * sl); d.data[i + 2] = 255 * Math.min(1, (l * t.b + n) * sl);
+  }
+  x.putImageData(d, 0, 0);
+  x.fillStyle = '#E0E0D0'; x.font = `${Math.round(H / 26)}px monospace`;
+  x.fillText(`${F.label || 'CAM'}-07  14:32:08`, W * 0.03, H * 0.07);
+  return cv.toDataURL('image/png');
+}
+
+function stats() {
+  const tri = ms => ms.reduce((s, m) => s + (m.getTotalIndices() / 3 | 0), 0);
+  const lods = {}; for (const k in S.lods) lods[k] = tri(S.lods[k]);
+  const b = S.bbox;
+  return {
+    meshes: S.all.map(m => m.name), lod_tris: lods, col_meshes: S.cols.map(m => m.name),
+    sockets: S.sockets.map(n => ({ name: n.name, pos: n.getAbsolutePosition().asArray().map(v => +v.toFixed(3)) })),
+    states: S.states.map(m => m.name), broken: S.broken.length,
+    bbox_gltf: { min: b.min.asArray().map(v => +v.toFixed(3)), max: b.max.asArray().map(v => +v.toFixed(3)) },
+    extras: S.extras, materials: [...new Set(S.all.map(m => m.material && m.material.name).filter(Boolean))],
+    texture_widths: S.texW,
+  };
+}
+window.stats = stats;
+
+window.sheet = async (items, cols, title) => {
+  const imgs = await Promise.all(items.map(it => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = it.url; })));
+  const w = imgs[0].width, h = imgs[0].height, sc = 0.5, cw = w * sc, ch = h * sc, pad = 34;
+  const rows = Math.ceil(imgs.length / cols);
+  const cv = document.createElement('canvas'); cv.width = cw * cols; cv.height = rows * (ch + pad) + 40;
+  const x = cv.getContext('2d'); x.fillStyle = '#1b1c1c'; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = '#e6e2d6'; x.font = '20px monospace'; x.fillText(title, 12, 27);
+  imgs.forEach((im, i) => {
+    const cx = (i % cols) * cw, cy = 40 + Math.floor(i / cols) * (ch + pad);
+    x.fillStyle = '#e0a030'; x.font = '15px monospace'; x.fillText(items[i].name + (items[i].note ? '  ' + items[i].note : ''), cx + 8, cy + 22);
+    x.drawImage(im, cx, cy + pad, cw, ch);
+  });
+  return cv.toDataURL('image/png');
+};
+</script>
+</body>
+</html>

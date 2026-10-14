@@ -4,3 +4,4 @@ __pycache__/
 *.blend1
 /references/
 /renders/
+node_modules/

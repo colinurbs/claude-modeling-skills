@@ -1,0 +1,156 @@
+{
+  "id": "anim_fp_ITEM",
+  "mode": "first_person",
+  "status": "wip",
+  "tier": "S",
+  "item": "wpn_ITEM",
+  "notes": "Intent (S8): weighty, grounded, worn; what the player must read.",
+  "sources": {
+    "keyed": {
+      "file": "(this brief)",
+      "kind": "hand",
+      "credit": "keyed by game-animation",
+      "license": "project-owned (keyed)",
+      "acquired": "YYYY-MM-DD"
+    }
+  },
+  "part_defaults": {},
+  "grip_r": {
+    "auto": {
+      "pose": "pistol_grip",
+      "web": [
+        0.0,
+        0.027,
+        -0.024
+      ]
+    }
+  },
+  "breath": {
+    "period_s": 4.0
+  },
+  "grips": {
+    "support": {
+      "space": "socket:socket_hand_l",
+      "pos": [
+        0,
+        0,
+        0
+      ],
+      "fingers": "cup",
+      "fit": true,
+      "fallback": {
+        "space": "item",
+        "pos": [
+          0,
+          -0.05,
+          0
+        ],
+        "fingers_dir": [
+          1,
+          0,
+          0.3
+        ],
+        "thumb_dir": [
+          -0.3,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "poses": {
+    "ready": {
+      "item": {
+        "pos": [
+          0.12,
+          -0.13,
+          0.34
+        ],
+        "rot": [
+          -3,
+          1.5,
+          0
+        ]
+      },
+      "hand_r": {
+        "fingers": "pistol_grip",
+        "fit": true
+      },
+      "hand_l": {
+        "grip": "support"
+      }
+    }
+  },
+  "clips": [
+    {
+      "name": "anim_fp_ITEM_idle_loop",
+      "action": "idle",
+      "frames": 121,
+      "loop": true,
+      "tags": [
+        "fp",
+        "idle"
+      ],
+      "keys": [
+        {
+          "f": 0,
+          "pose": "ready"
+        },
+        {
+          "f": 120,
+          "pose": "ready"
+        }
+      ],
+      "notes": "4 s breathing hold."
+    },
+    {
+      "name": "anim_fp_ITEM_fire",
+      "action": "fire",
+      "frames": 18,
+      "tags": [
+        "fp",
+        "fire",
+        "fast"
+      ],
+      "refire_frame": 9,
+      "keys": [
+        {
+          "f": 0,
+          "pose": "ready"
+        },
+        {
+          "f": 17,
+          "pose": "ready"
+        }
+      ],
+      "parts": {},
+      "recoil": [
+        {
+          "f": 2,
+          "kick_deg": 8,
+          "back_m": 0.035,
+          "rise_m": 0.012
+        }
+      ],
+      "events": [
+        {
+          "f": 2,
+          "name": "trigger"
+        },
+        {
+          "f": 2,
+          "name": "fire",
+          "socket": "socket_muzzle"
+        },
+        {
+          "f": 3,
+          "name": "shell_eject",
+          "socket": "socket_eject"
+        }
+      ]
+    }
+  ],
+  "review": {
+    "video": false
+  }
+}

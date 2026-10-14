@@ -1,0 +1,1181 @@
+{
+ "_note": "Class templates for vfx_cli.py new. Replace notes with the INTENT (what the player / the Governor's CCTV must read), then tune. Colours: hex or palette swatch names (S3). Effect-local -Z = out (socket forward / surface normal).",
+ "classes": {
+  "muzzle": {
+   "class": "muzzle",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 1.0,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "fire",
+    "socket": "socket_muzzle"
+   },
+   "hooks": {
+    "light": {
+     "color": "tungsten",
+     "intensity": 2.5,
+     "range_m": 4.5,
+     "duration_s": 0.05,
+     "curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       0
+      ]
+     ],
+     "offset_m": 0.1
+    },
+    "sfx": null
+   },
+   "lod": {
+    "reduce_m": 25,
+    "cull_m": 150,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "flash_core",
+     "texture": "t_vfx_flash_a_e",
+     "frame_mode": "random",
+     "blend": "add",
+     "billboard": "camera",
+     "lit": false,
+     "shape": {
+      "type": "point"
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": 1
+      }
+     ],
+     "life_s": [
+      0.03,
+      0.045
+     ],
+     "speed_mps": 0,
+     "size_m": [
+      0.09,
+      0.13
+     ],
+     "size_curve": [
+      [
+       0,
+       0.85
+      ],
+      [
+       1,
+       1.15
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#F2E4C6",
+       0.9
+      ],
+      [
+       1,
+       "#C49A64",
+       0.0
+      ]
+     ],
+     "role": "flash"
+    },
+    {
+     "name": "smoke",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 12
+     },
+     "bursts": [
+      {
+       "t": 0.01,
+       "count": [
+        2,
+        3
+       ]
+      }
+     ],
+     "life_s": [
+      0.6,
+      1.0
+     ],
+     "speed_mps": [
+      0.5,
+      1.0
+     ],
+     "size_m": [
+      0.04,
+      0.06
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       5
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "drag": 3.0,
+     "gravity": [
+      0,
+      0.22,
+      0
+     ]
+    }
+   ],
+   "review": {
+    "context": "weapon",
+    "weapon": "wpn_pistol_a"
+   }
+  },
+  "shell": {
+   "class": "shell",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 0.62,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "shell_eject",
+    "socket": "socket_eject"
+   },
+   "hooks": {
+    "mesh": {
+     "id": "wpn_casing_9mm_a",
+     "physics": true,
+     "mass_kg": 0.008
+    },
+    "sfx": null
+   },
+   "lod": {
+    "reduce_m": 10,
+    "cull_m": 30,
+    "reduce_factor": 1.0
+   },
+   "emitters": [
+    {
+     "name": "casing",
+     "texture": "t_vfx_debris_a_bc",
+     "frame_mode": "fixed",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 12
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": 1
+      }
+     ],
+     "life_s": [
+      0.55,
+      0.6
+     ],
+     "speed_mps": [
+      1.6,
+      2.4
+     ],
+     "size_m": [
+      0.03,
+      0.032
+     ],
+     "size_curve": null,
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#D8D8D8",
+       1
+      ],
+      [
+       0.85,
+       "#D8D8D8",
+       1
+      ],
+      [
+       1,
+       "#D8D8D8",
+       0
+      ]
+     ],
+     "role": "mesh_fallback",
+     "frames": [
+      14,
+      14
+     ],
+     "gravity": [
+      0,
+      -9.81,
+      0
+     ],
+     "spin_dps": [
+      900,
+      1600
+     ]
+    }
+   ],
+   "review": {
+    "context": "weapon",
+    "weapon": "wpn_pistol_a"
+   }
+  },
+  "impact": {
+   "class": "impact",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 1.5,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "hit"
+   },
+   "hooks": {
+    "surface": "concrete",
+    "decal": {
+     "id": "dec_bullet_hole_concrete_a",
+     "place": "surface"
+    },
+    "sfx": "sfx_impact_concrete"
+   },
+   "lod": {
+    "reduce_m": 20,
+    "cull_m": 70,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "dust",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        2,
+        3
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      0.5,
+      1.0
+     ],
+     "size_m": [
+      0.05,
+      0.08
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       3
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "drag": 3.0
+    },
+    {
+     "name": "chips",
+     "texture": "t_vfx_debris_a_bc",
+     "frame_mode": "random",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        5,
+        8
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      2,
+      5
+     ],
+     "size_m": [
+      0.012,
+      0.025
+     ],
+     "size_curve": null,
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#D8D8D8",
+       1
+      ],
+      [
+       0.8,
+       "#D8D8D8",
+       1
+      ],
+      [
+       1,
+       "#D8D8D8",
+       0
+      ]
+     ],
+     "frames": [
+      0,
+      3
+     ],
+     "gravity": [
+      0,
+      -9.81,
+      0
+     ],
+     "spin_dps": [
+      -900,
+      900
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  },
+  "smoke": {
+   "class": "smoke",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 4.0,
+   "loop": true,
+   "notes": "",
+   "attach": {},
+   "hooks": {},
+   "lod": {
+    "reduce_m": 30,
+    "cull_m": 120,
+    "reduce_factor": 0.4
+   },
+   "emitters": [
+    {
+     "name": "smoke",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "disc",
+      "radius": 0.3,
+      "angle_deg": 15
+     },
+     "bursts": [],
+     "life_s": [
+      3,
+      5
+     ],
+     "speed_mps": [
+      0.3,
+      0.6
+     ],
+     "size_m": [
+      0.3,
+      0.5
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       4
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "rate": {
+      "per_s": 20,
+      "t0": 0
+     },
+     "gravity": [
+      0,
+      0.4,
+      0
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  },
+  "fire": {
+   "class": "fire",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 4.0,
+   "loop": true,
+   "notes": "",
+   "attach": {
+    "event": "ignite",
+    "socket": "socket_fuse"
+   },
+   "hooks": {
+    "light": {
+     "color": "tungsten",
+     "intensity": 3.0,
+     "range_m": 7.0,
+     "duration_s": 0.1,
+     "curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       1
+      ]
+     ]
+    },
+    "sfx": null
+   },
+   "lod": {
+    "reduce_m": 30,
+    "cull_m": 150,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "flames",
+     "texture": "t_vfx_flash_side_a_e",
+     "frame_mode": "over_life",
+     "blend": "add",
+     "billboard": "y_axis",
+     "lit": false,
+     "shape": {
+      "type": "disc",
+      "radius": 0.2,
+      "angle_deg": 10
+     },
+     "bursts": [],
+     "life_s": [
+      0.3,
+      0.6
+     ],
+     "speed_mps": [
+      0.5,
+      1.2
+     ],
+     "size_m": [
+      0.05,
+      0.08
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       3
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#E8C88A",
+       0.0
+      ],
+      [
+       0.2,
+       "#E2B880",
+       0.7
+      ],
+      [
+       1,
+       "#A87A52",
+       0.0
+      ]
+     ],
+     "rate": {
+      "per_s": 30
+     }
+    },
+    {
+     "name": "smoke",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "disc",
+      "radius": 0.3,
+      "angle_deg": 15
+     },
+     "bursts": [],
+     "life_s": [
+      3,
+      5
+     ],
+     "speed_mps": [
+      0.3,
+      0.6
+     ],
+     "size_m": [
+      0.3,
+      0.5
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       4
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "rate": {
+      "per_s": 20,
+      "t0": 0
+     },
+     "gravity": [
+      0,
+      0.4,
+      0
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  },
+  "explosion": {
+   "class": "explosion",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 1.5,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "hit"
+   },
+   "hooks": {
+    "surface": "concrete",
+    "decal": {
+     "id": "dec_bullet_hole_concrete_a",
+     "place": "surface"
+    },
+    "sfx": "sfx_impact_concrete"
+   },
+   "lod": {
+    "reduce_m": 20,
+    "cull_m": 70,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "dust",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        2,
+        3
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      0.5,
+      1.0
+     ],
+     "size_m": [
+      0.05,
+      0.08
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       3
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "drag": 3.0
+    },
+    {
+     "name": "chips",
+     "texture": "t_vfx_debris_a_bc",
+     "frame_mode": "random",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        5,
+        8
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      2,
+      5
+     ],
+     "size_m": [
+      0.012,
+      0.025
+     ],
+     "size_curve": null,
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#D8D8D8",
+       1
+      ],
+      [
+       0.8,
+       "#D8D8D8",
+       1
+      ],
+      [
+       1,
+       "#D8D8D8",
+       0
+      ]
+     ],
+     "frames": [
+      0,
+      3
+     ],
+     "gravity": [
+      0,
+      -9.81,
+      0
+     ],
+     "spin_dps": [
+      -900,
+      900
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  },
+  "spark": {
+   "class": "spark",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 1.5,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "hit"
+   },
+   "hooks": {
+    "surface": "concrete",
+    "decal": {
+     "id": "dec_bullet_hole_concrete_a",
+     "place": "surface"
+    },
+    "sfx": "sfx_impact_concrete"
+   },
+   "lod": {
+    "reduce_m": 20,
+    "cull_m": 70,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "dust",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        2,
+        3
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      0.5,
+      1.0
+     ],
+     "size_m": [
+      0.05,
+      0.08
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       3
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "drag": 3.0
+    },
+    {
+     "name": "chips",
+     "texture": "t_vfx_debris_a_bc",
+     "frame_mode": "random",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        5,
+        8
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      2,
+      5
+     ],
+     "size_m": [
+      0.012,
+      0.025
+     ],
+     "size_curve": null,
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#D8D8D8",
+       1
+      ],
+      [
+       0.8,
+       "#D8D8D8",
+       1
+      ],
+      [
+       1,
+       "#D8D8D8",
+       0
+      ]
+     ],
+     "frames": [
+      0,
+      3
+     ],
+     "gravity": [
+      0,
+      -9.81,
+      0
+     ],
+     "spin_dps": [
+      -900,
+      900
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  },
+  "ambient": {
+   "class": "ambient",
+   "tier": "S",
+   "status": "wip",
+   "duration_s": 1.5,
+   "loop": false,
+   "notes": "",
+   "attach": {
+    "event": "hit"
+   },
+   "hooks": {
+    "surface": "concrete",
+    "decal": {
+     "id": "dec_bullet_hole_concrete_a",
+     "place": "surface"
+    },
+    "sfx": "sfx_impact_concrete"
+   },
+   "lod": {
+    "reduce_m": 20,
+    "cull_m": 70,
+    "reduce_factor": 0.5
+   },
+   "emitters": [
+    {
+     "name": "dust",
+     "texture": "t_vfx_smoke_a_bc",
+     "frame_mode": "over_life",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        2,
+        3
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      0.5,
+      1.0
+     ],
+     "size_m": [
+      0.05,
+      0.08
+     ],
+     "size_curve": [
+      [
+       0,
+       1
+      ],
+      [
+       1,
+       3
+      ]
+     ],
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#8A8B86",
+       0.0
+      ],
+      [
+       0.15,
+       "#8A8B86",
+       0.4
+      ],
+      [
+       1,
+       "#86877F",
+       0.0
+      ]
+     ],
+     "drag": 3.0
+    },
+    {
+     "name": "chips",
+     "texture": "t_vfx_debris_a_bc",
+     "frame_mode": "random",
+     "blend": "alpha",
+     "billboard": "camera",
+     "lit": true,
+     "shape": {
+      "type": "cone",
+      "angle_deg": 30
+     },
+     "bursts": [
+      {
+       "t": 0,
+       "count": [
+        5,
+        8
+       ]
+      }
+     ],
+     "life_s": [
+      0.4,
+      0.8
+     ],
+     "speed_mps": [
+      2,
+      5
+     ],
+     "size_m": [
+      0.012,
+      0.025
+     ],
+     "size_curve": null,
+     "rotation_deg": [
+      0,
+      360
+     ],
+     "color": [
+      [
+       0,
+       "#D8D8D8",
+       1
+      ],
+      [
+       0.8,
+       "#D8D8D8",
+       1
+      ],
+      [
+       1,
+       "#D8D8D8",
+       0
+      ]
+     ],
+     "frames": [
+      0,
+      3
+     ],
+     "gravity": [
+      0,
+      -9.81,
+      0
+     ],
+     "spin_dps": [
+      -900,
+      900
+     ]
+    }
+   ],
+   "review": {
+    "context": "surface",
+    "material": "m_props_concrete",
+    "lib": "props"
+   }
+  }
+ }
+}

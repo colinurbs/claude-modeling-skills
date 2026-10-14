@@ -1,0 +1,438 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vfx review harness</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script src="/gam/node_modules/babylonjs/babylon.js"></script>
+<script src="/gam/node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// game-vfx review harness (driven by shoot_vfx.mjs). Right-handed scene so glTF values are used as-is.
+// Lighting mirrors packages/engine/src/render/engine.ts createScene (overcast hemi + soft sun + constant-radiance env + EXP2
+// Haze fog); the grade mirrors post.ts applyGrade (no bloom, no CA, desaturation curve, lifted blacks; grain off for stable
+// frames); the CCTV feed mirrors feed.ts (320x240, greyscale-green, scanlines, roll). Effects are built by the skill's
+// reference runtime (tools/runtime/vfx_babylon.mjs), the same code the playback test runs under NullEngine.
+import { createVfxRuntime } from '/runtime/vfx_babylon.mjs';
+const B = BABYLON;
+let engine, scene, cam, cctv, pipeline, gradePP, crtPP, lights = {}, job, rt, ctx = {}, decalMesh = null;
+const hex3 = (h) => B.Color3.FromHexString(h.length === 7 ? h : '#' + h.replace('#', ''));
+const hex4 = (h, a = 1) => { const c = hex3(h); return new B.Color4(c.r, c.g, c.b, a); };
+const err = [];
+function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const nativeRandom = Math.random;
+
+const GRADE = `precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform float amount; uniform float lift;
+void main(void){ vec4 c=texture2D(textureSampler,vUV); float lum=dot(c.rgb,vec3(0.2126,0.7152,0.0722)); vec3 g=mix(vec3(lum),c.rgb,1.0-amount);
+g=g*(1.0-lift)+vec3(lift*0.9,lift*0.92,lift*0.9); g=pow(g,vec3(1.02)); gl_FragColor=vec4(g,c.a);}`;
+const CRT = `precision highp float; varying vec2 vUV; uniform sampler2D textureSampler; uniform float time; uniform vec2 res;
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void main(void){ vec2 uv=vUV; vec2 c=uv-0.5; float r2=dot(c,c); uv=0.5+c*(1.0+0.08*r2); uv.y+=0.004*sin(time*0.7+uv.y*6.0);
+vec3 col=texture2D(textureSampler,uv).rgb; float lum=dot(col,vec3(0.2126,0.7152,0.0722));
+vec3 g=vec3(lum*0.82,lum*0.98,lum*0.88)+vec3(0.02,0.05,0.03); float scan=0.85+0.15*sin(uv.y*res.y*3.14159);
+float roll=smoothstep(0.0,0.08,abs(fract(uv.y-time*0.05)-0.5))*0.15+0.85; float noise=(hash(uv*res+time)-0.5)*0.08;
+float vig=1.0-smoothstep(0.35,0.8,length(c)*1.2); vec3 o=(g*scan*roll+noise)*(0.55+0.45*vig);
+if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0)o=vec3(0.0); gl_FragColor=vec4(o,1.0);}`;
+B.Effect.ShadersStore.vfxGradeFragmentShader = GRADE;
+B.Effect.ShadersStore.vfxCrtFragmentShader = CRT;
+
+function pbr(name, albedo, rough = 0.95) { const m = new B.PBRMaterial(name, scene); m.albedoColor = hex3(albedo); m.metallic = 0; m.roughness = rough; return m; }
+function texMat(name, t, tile, size) {
+  const m = new B.PBRMaterial(name, scene); m.metallic = 1; m.roughness = 1;
+  const T = (u, srgb) => { const x = new B.Texture(u, scene, false, false); x.uScale = size[0] / tile; x.vScale = size[1] / tile; if (!srgb) x.gammaSpace = false; return x; };
+  if (t.base) m.albedoTexture = T('/ctx/tex/base.png', true);
+  if (t.orm) { m.metallicTexture = T('/ctx/tex/orm.png', false); m.useRoughnessFromMetallicTextureGreen = true; m.useMetallnessFromMetallicTextureBlue = true; m.useAmbientOcclusionFromMetallicTextureRed = true; m.useRoughnessFromMetallicTextureAlpha = false; }
+  if (t.normal) m.bumpTexture = T('/ctx/tex/normal.png', false);
+  return m;
+}
+const ready = () => new Promise((res) => scene.executeWhenReady(() => res()));
+
+window.boot = async (j) => {
+  job = j; const R = j.review; const [W, H] = R.size;
+  const canvas = document.getElementById('c'); canvas.width = W; canvas.height = H;
+  engine = new B.Engine(canvas, true, { preserveDrawingBuffer: true, antialias: true, stencil: true });
+  scene = new B.Scene(engine); scene.useRightHandedSystem = true;
+  scene.getAnimationRatio = () => 1;                  // one render = exactly 1/60 s for particles and the runtime clock
+  scene.fogMode = B.Scene.FOGMODE_EXP2;
+  lights.hemi = new B.HemisphericLight('hemi', new B.Vector3(0, 1, 0), scene); lights.hemi.diffuse = hex3(j.palette.overcast); lights.hemi.groundColor = hex3(j.palette.soot); lights.hemi.specular = B.Color3.Black();
+  lights.sun = new B.DirectionalLight('sun', new B.Vector3(-0.35, -1, -0.25).normalize(), scene); lights.sun.diffuse = hex3(j.palette.overcast); lights.sun.specular = new B.Color3(0.1, 0.1, 0.1);
+  const fl = R.night.floodlight; lights.flood = new B.PointLight('flood', new B.Vector3(-3, 5.5, 3), scene); lights.flood.diffuse = hex3(fl.color); lights.flood.specular = B.Color3.Black(); lights.flood.range = fl.range; lights.flood.radius = 2; lights.flood.falloffType = B.PointLight.FALLOFF_STANDARD;
+  const c = hex3(j.palette.haze); const px = new Uint8Array([c.r * 255, c.g * 255, c.b * 255, 255].map(Math.round));
+  const env = new B.RawCubeTexture(scene, [px, px, px, px, px, px], 1, B.Constants.TEXTUREFORMAT_RGBA, B.Constants.TEXTURETYPE_UNSIGNED_BYTE, false, false, B.Constants.TEXTURE_NEAREST_SAMPLINGMODE);
+  env.gammaSpace = true; scene.environmentTexture = env;
+  // ground: Cast, a kerb line; far wall for muzzle views
+  const ground = B.MeshBuilder.CreateGround('ground', { width: 60, height: 60 }, scene); ground.material = pbr('g', j.palette.cast);
+  cam = new B.UniversalCamera('cam', new B.Vector3(0, 1.6, 3), scene); cam.minZ = 0.01; cam.maxZ = 200; scene.activeCamera = cam;
+  // grade (post.ts)
+  const G = R.grade;
+  pipeline = new B.DefaultRenderingPipeline('grade', false, scene, [cam]);
+  pipeline.samples = 4; pipeline.fxaaEnabled = true; pipeline.bloomEnabled = false; pipeline.chromaticAberrationEnabled = false; pipeline.sharpenEnabled = false; pipeline.grainEnabled = false;
+  pipeline.imageProcessingEnabled = true; const ip = pipeline.imageProcessing; ip.contrast = G.contrast; ip.exposure = 1; ip.vignetteEnabled = true; ip.vignetteWeight = G.vignette; ip.vignetteStretch = 0.3; ip.vignetteColor = hex4(j.palette.soot, 0);
+  const cc = new B.ColorCurves(); cc.globalSaturation = G.global_saturation; cc.shadowsSaturation = G.shadows_saturation; cc.highlightsSaturation = G.highlights_saturation; ip.colorCurves = cc; ip.colorCurvesEnabled = true;
+  gradePP = new B.PostProcess('vfxGrade', 'vfxGrade', ['amount', 'lift'], null, 1.0, cam);
+  gradePP.onApply = (e) => { e.setFloat('amount', G.desaturate); e.setFloat('lift', G.lift); };
+  // CCTV camera (feed.ts): its own camera with the CRT pass only
+  cctv = new B.UniversalCamera('cctv', new B.Vector3(0, 3.5, 9), scene); cctv.fov = 70 * Math.PI / 180; cctv.minZ = 0.1; cctv.maxZ = 200;
+  let ctime = 0; crtPP = new B.PostProcess('vfxCrt', 'vfxCrt', ['time', 'res'], null, 1.0, cctv);
+  crtPP.onApply = (e) => { ctime += 1 / 12; e.setFloat('time', ctime); e.setFloat2('res', 320, 240); };
+  await buildContext();
+  // Babylon draws particles BEFORE transparent meshes in a rendering group, so a glass pane in front of nothing would paint
+  // over the shards flying toward the camera. Engine ask (engine-notes): VFX in rendering group 1 without a depth clear.
+  // The harness does the same for transparent (constant BLEND) surfaces only.
+  const vfxGroup = j.context.const && j.context.const.opacity < 1 ? 1 : null;
+  if (vfxGroup) scene.setRenderingAutoClearDepthStencil(1, false, false, false);
+  rt = createVfxRuntime(B, scene, { textureBase: '/vfx/', ambient: 1, renderingGroupId: vfxGroup });
+  await ready();
+  // warm-up (rt.prepare): load sheets + compile shaders first, or the first frames swallow the flash.
+  if (!(await rt.prepare([j.effect]))) throw new Error('vfx textures did not load');
+  return { ok: true };
+};
+
+function setMode(mode) {
+  const R = job.review; const m = R[mode];
+  lights.hemi.intensity = m.hemi; lights.sun.intensity = m.sun; scene.environmentIntensity = m.env;
+  lights.flood.intensity = mode === 'night' ? m.floodlight.intensity * (job.context.night_flood ?? 1) : 0;   // night_flood 0: an unlit street (fire is the light)
+  scene.clearColor = hex4(m.clear); scene.fogColor = hex3(m.clear); scene.fogDensity = m.fog_density;
+  ctx.mode = mode;
+}
+
+async function buildContext() {
+  const C = job.context; const P = job.palette;
+  if (C.context === 'weapon') {
+    const res = await B.SceneLoader.ImportMeshAsync('', '/ctx/', 'weapon.glb', scene);
+    const root = res.meshes.find((m) => m.name === '__root__') || res.transformNodes[0];
+    for (const m of res.meshes) if (/_lod[12]$/.test(m.name)) m.setEnabled(false);
+    const ex = {}; for (const n of [...res.transformNodes, ...res.meshes]) Object.assign(ex, n.metadata?.gltf?.extras || {});
+    ctx.weapon = root; ctx.fpOffset = ex.ig_fp_offset || [0.13, -0.16, -0.4];
+    ctx.sockets = {}; for (const n of [...res.transformNodes, ...res.meshes]) if (n.name.startsWith('socket_')) ctx.sockets[n.name] = n;
+    const wall = B.MeshBuilder.CreateBox('wall', { width: 30, height: 9, depth: 0.5 }, scene); wall.position.set(0, 4.5, -9); wall.material = pbr('w', P.ochre_brick);
+    const kerb = B.MeshBuilder.CreateBox('kerb', { width: 30, height: 0.15, depth: 2.5 }, scene); kerb.position.set(0, 0.075, -7.5); kerb.material = pbr('k', P.slab);
+  } else if (C.context === 'surface') {
+    const size = [4, 3];
+    const wall = B.MeshBuilder.CreatePlane('wall', { width: size[0], height: size[1], sideOrientation: B.Mesh.DOUBLESIDE }, scene);
+    wall.rotation.y = Math.PI; wall.position.set(0, 1.5, 0); // RH: plane faces +Z after the flip
+    if (C.const) {   // constant material (glass pane: tinted, alpha-blended, glossy) in a dark frame; the back wall shows through
+      const m = pbr('wallm', C.const.color, C.const.roughness); m.metallic = C.const.metallic; m.alpha = C.const.opacity; m.backFaceCulling = false; wall.material = m;
+      const fr = pbr('frame', P.soot, 0.8); for (const [w, h, x, y] of [[4.1, 0.08, 0, 3.0], [4.1, 0.08, 0, 0.0], [0.08, 3.1, -2.0, 1.5], [0.08, 3.1, 2.0, 1.5]]) { const b = B.MeshBuilder.CreateBox('fr', { width: w, height: h, depth: 0.08 }, scene); b.position.set(x, y, -0.02); b.material = fr; }
+    } else wall.material = texMat('wallm', C.tex || {}, C.tile_m || 2, size);
+    ctx.surface = wall; ctx.hit = new B.Vector3(0.25, 1.45, 0.0); ctx.normal = new B.Vector3(0, 0, 1);
+    const back = B.MeshBuilder.CreateBox('back', { width: 30, height: 9, depth: 0.5 }, scene); back.position.set(0, 4.5, -6); back.material = pbr('b', P.ochre_brick);
+  } else if (C.context === 'body') {
+    const res = await B.SceneLoader.ImportMeshAsync('', '/ctx/', 'body.glb', scene);
+    for (const m of res.meshes) if (/_lod[12]$/.test(m.name)) m.setEnabled(false);
+    await ready(); scene.render();
+    const ray = new B.Ray(new B.Vector3(0.05, 1.32, 3), new B.Vector3(0, 0, -1), 5);
+    const hit = scene.pickWithRay(ray, (m) => m.name !== 'ground' && m.isEnabled() && m.getTotalVertices() > 0);
+    ctx.hit = hit?.hit ? hit.pickedPoint.clone() : new B.Vector3(0.05, 1.32, 0.13); ctx.normal = new B.Vector3(0, 0, 1);
+    ctx.surface = hit?.pickedMesh || null;
+    const back = B.MeshBuilder.CreateBox('back', { width: 30, height: 9, depth: 0.5 }, scene); back.position.set(0, 4.5, -6); back.material = pbr('b', P.ochre_brick);
+  } else if (C.context === 'ground') {
+    // volumes and props (gas, fire, chimney, cigarette): the effect at C.point along C.normal (default up), an optional
+    // prop glb (burning drum, chimney stack, body) at C.prop_pos, a street-width backdrop; cameras from C.views
+    if (C.glb) {
+      const res = await B.SceneLoader.ImportMeshAsync('', '/ctx/', 'prop.glb', scene);
+      for (const m of res.meshes) { if (/_lod[12]$|_col$/.test(m.name)) m.setEnabled(false); }
+      const root = res.meshes.find((m) => m.name === '__root__'); const pp = C.prop_pos || [0, 0, 0];
+      if (root) { root.position.set(pp[0], pp[1], pp[2]); if (C.prop_yaw) root.rotationQuaternion = B.Quaternion.RotationAxis(B.Axis.Y, C.prop_yaw * Math.PI / 180); }
+    }
+    if (C.anim && C.glb) await buildAnim(C);   // round 6: a body playing a real clip, the effect riding a bone (cigarette)
+    // review.inputs_schedule {name: [[t, value], ...]} (no anim): inputs stepped on the instance clock from each spawn
+    // (exhaust: idle, then a pull-away at full throttle, then idle again)
+    if (C.inputs_schedule && !C.anim) scene.onBeforeRenderObservable.add(() => {
+      if (!ctx.liveInst || ctx.schedT == null) return; const v = {};
+      for (const [k, keys] of Object.entries(C.inputs_schedule)) { let val = keys[0][1]; for (const [t0, x] of keys) if (ctx.schedT >= t0) val = x; v[k] = val; }
+      ctx.liveInst.setInputs(v); ctx.schedT += 1 / 60;
+    }, -1, true);
+    const pt = C.point || [0, 0, 0], nm = C.normal || [0, 1, 0];
+    ctx.hit = new B.Vector3(pt[0], pt[1], pt[2]); ctx.normal = new B.Vector3(nm[0], nm[1], nm[2]); ctx.surface = scene.getMeshByName('ground');
+    const bz = C.backdrop_z ?? -14;
+    const back = B.MeshBuilder.CreateBox('back', { width: 60, height: 12, depth: 0.5 }, scene); back.position.set(0, 6, bz); back.material = pbr('b', P.ochre_brick);
+    const kerb = B.MeshBuilder.CreateBox('kerb', { width: 60, height: 0.15, depth: 2.5 }, scene); kerb.position.set(0, 0.075, bz + 1.5); kerb.material = pbr('k', P.slab);
+  }
+}
+
+// round 6 (review.anim): pose the prop body with a real clip through the engine's retarget math (game-animation
+// harness_anim / packages/engine/src/anim/retarget.ts: q_rig = A_parent^-1 * q_clip * A_bone; hips scaled from hips_rest_src),
+// advanced 1/60 s per render; review.attach_node: spawn the effect on that bone with follow (attach_hand_r); review.held: a
+// stand-in stick along the bone +Y (the held item's forward) so the strand can be judged against the item tip;
+// anim.inputs: a time schedule of runtime inputs over the clip (e.g. drag), standing in for a missing anim event.
+async function buildAnim(C) {
+  const A = C.anim; const byName = {};
+  for (const n of scene.transformNodes) if (!byName[n.name]) byName[n.name] = n;
+  const nodes = {}; for (const b of A.bones) if (byName[b]) nodes[b] = byName[b];
+  const rest = {}, Aw = {}, Ainv = {};
+  for (const b of A.bones) {
+    const n = nodes[b]; if (!n) continue;
+    if (!n.rotationQuaternion) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+    rest[b] = { p: n.position.clone(), q: n.rotationQuaternion.clone() };
+    const p = A.parents[b]; const pw = (p && Aw[p]) || B.Quaternion.Identity();
+    const w = pw.multiply(rest[b].q); w.normalize(); Aw[b] = w; Ainv[b] = B.Quaternion.Inverse(w);
+  }
+  const before = new Set(scene.animationGroups);
+  const ar = await B.SceneLoader.ImportMeshAsync('', '/ctx/', 'anim.glb', scene);
+  for (const m of ar.meshes) m.setEnabled(false); for (const n of ar.transformNodes) n.setEnabled(false);
+  let clip = null;
+  for (const g of scene.animationGroups) {
+    if (before.has(g)) continue; g.stop();
+    if (g.name !== A.clip) continue;
+    const tracks = {};
+    for (const ta of g.targetedAnimations) { const t = tracks[ta.target.name] = tracks[ta.target.name] || {}; if (ta.animation.targetProperty === 'rotationQuaternion') t.rot = ta.animation; else if (ta.animation.targetProperty === 'position') t.pos = ta.animation; }
+    clip = { tracks, from: g.from, to: g.to, fps: (g.targetedAnimations[0] && g.targetedAnimations[0].animation.framePerSecond) || 60 };
+  }
+  if (!clip) throw new Error('review.anim clip not found: ' + A.clip);
+  const dur = (clip.to - clip.from) / clip.fps; const src = B.Vector3.FromArray(A.hips_rest_src);
+  ctx.anim = { start: A.start_s || 0, dur, pose(t) {
+    const f = clip.from + ((((t % dur) + dur) % dur) * clip.fps);
+    for (const b of A.bones) {
+      const n = nodes[b]; if (!n) continue; const tr = clip.tracks[b];
+      const p = A.parents[b]; const ap = (p && Ainv[p]) || B.Quaternion.Identity();
+      if (tr && tr.rot) { const q = ap.multiply(tr.rot.evaluate(f)).multiply(Aw[b]); q.normalize(); n.rotationQuaternion.copyFrom(q); } else n.rotationQuaternion.copyFrom(rest[b].q);
+      if (tr && tr.pos && b === 'hips') { const key = tr.pos.evaluate(f); const sc = rest[b].p.length() / src.length(); const out = new B.Vector3(); key.subtract(src).scale(sc).rotateByQuaternionToRef(ap, out); n.position.copyFrom(out.add(rest[b].p)); }
+      else n.position.copyFrom(rest[b].p);   // root motion off (an idle in place)
+    }
+    for (const b of A.bones) if (nodes[b]) nodes[b].computeWorldMatrix(true);
+  } };
+  ctx.animT = ctx.anim.start; ctx.anim.pose(ctx.animT);
+  if (C.attach_node) { ctx.attachNode = nodes[C.attach_node] || byName[C.attach_node]; if (!ctx.attachNode) throw new Error('review.attach_node not found: ' + C.attach_node); }
+  if (C.held && ctx.attachNode) {   // stand-in held item: a stick from the grip along bone +Y
+    const h = C.held; const st = B.MeshBuilder.CreateCylinder('held', { height: h.length_m, diameter: h.diameter_m, tessellation: 10 }, scene);
+    st.material = pbr('heldm', h.color || '#D6D2C6', 0.8); st.parent = ctx.attachNode; st.position.set(0, h.length_m / 2 + (h.from_m || 0), 0);
+  }
+  const sched = A.inputs || {};
+  scene.onBeforeRenderObservable.add(() => {
+    if (!ctx.anim) return;
+    ctx.anim.pose(ctx.animT);
+    const u = ((ctx.animT % dur) + dur) % dur; const v = {};
+    for (const [k, keys] of Object.entries(sched)) { let val = keys[0][1]; for (const [t0, x] of keys) if (u >= t0) val = x; v[k] = val; }
+    if (ctx.liveInst && Object.keys(v).length) ctx.liveInst.setInputs(v);
+    ctx.animT += 1 / 60;
+  }, -1, true);
+}
+
+// loops never retire on their own: dispose every live instance between sequences (rt.update(1e6) would flood a loop)
+const amb = () => (ctx.mode === 'night' && job.context.night_ambient != null ? job.context.night_ambient : job.review[ctx.mode].ambient);
+function retireAll(r = rt) { for (const i of [...r.instances]) i.dispose(); }
+function viewFrom(v) { cam.position.set(...v.pos); cam.setTarget(new B.Vector3(...v.target)); if (v.fov) cam.fov = v.fov * Math.PI / 180; }
+
+function placeDecal() {
+  if (decalMesh) { decalMesh.dispose(); decalMesh = null; }
+  const D = job.decal; if (!D || !ctx.hit) return;
+  let target = ctx.surface, point = ctx.hit, normal = ctx.normal;
+  if (D.place === 'ground_below') {  // review always shows the decal (the hook's chance is the engine's call)
+    target = scene.getMeshByName('ground'); point = new B.Vector3(ctx.hit.x, 0, ctx.hit.z + 0.35); normal = new B.Vector3(0, 1, 0); }
+  if (!target) return;
+  const d = D.def; const [u0, v0, u1, v1] = (d.cells_uv_gltf && d.cells_uv_gltf[0]) || d.uv_gltf;
+  const s = d.size_m; decalMesh = B.MeshBuilder.CreateDecal('decal', target, { position: point, normal, size: new B.Vector3(s[0], s[1], Math.max(0.12, Math.max(...s) * 0.5)), angle: 0, cullBackFaces: false });
+  const m = new B.PBRMaterial('decalm', scene); const t = new B.Texture('/ctx/decal.png', scene, false, true);
+  t.uOffset = u0; t.vOffset = 1 - v1; t.uScale = u1 - u0; t.vScale = v1 - v0; t.wrapU = t.wrapV = B.Texture.CLAMP_ADDRESSMODE; t.hasAlpha = true;
+  m.albedoTexture = t; m.useAlphaFromAlbedoTexture = true; m.transparencyMode = B.PBRMaterial.PBRMATERIAL_ALPHABLEND; m.metallic = 0; m.roughness = D.roughness;
+  m.useRadianceOverAlpha = false; m.useSpecularOverAlpha = false; m.zOffset = -1.5; m.backFaceCulling = false; decalMesh.material = m;
+}
+
+// ---------------------------------------------------------------- views
+function setView(view) {
+  const C = job.context; const fp = job.fp;
+  cam.fov = (view === 'context' && C.context !== 'weapon' ? job.review.fp.world_fov_deg : 54) * Math.PI / 180;
+  if (C.views && C.views[view]) { viewFrom(C.views[view]); return; }
+  if (C.context === 'weapon') {
+    const eye = new B.Vector3(0, 1.63, 0);
+    const o = ctx.fpOffset; ctx.weapon.position.set(eye.x + o[0], eye.y + o[1], eye.z + o[2]);
+    ctx.weapon.rotationQuaternion = B.Quaternion.RotationAxis(B.Axis.Y, Math.PI); ctx.weapon.scaling.setAll(1);
+    if (view === 'context') {   // close-up from the eye: the muzzle zoomed (narrow FOV), same viewpoint as the player
+      cam.position.copyFrom(eye); const s = ctx.sockets[job.effect.attach?.socket] || ctx.sockets.socket_muzzle; s.computeWorldMatrix(true);
+      const m = s.getAbsolutePosition(); cam.setTarget(m.add(new B.Vector3(0, 0.02, -0.06))); cam.fov = 13 * Math.PI / 180; return;
+    }
+    if (view === 'side') { const mz = ctx.weapon.position; const f = job.context.side_focus_m ?? 0.35; cam.position.set(mz.x + 0.9, mz.y + 0.12, mz.z - f); cam.setTarget(new B.Vector3(mz.x, mz.y + 0.03, mz.z - f)); cam.fov = 40 * Math.PI / 180; }   // review.side_focus_m: centre a long gun's muzzle (rifle ~0.9)
+    else { cam.position.copyFrom(eye); cam.setTarget(eye.add(new B.Vector3(0, 0, -1))); }
+  } else {
+    const h = ctx.hit;
+    if (view === 'context') { cam.position.set(h.x + 1.2, 1.65, h.z + 8); cam.setTarget(h); }
+    else if (job.context.context === 'body') { cam.position.set(h.x + 0.9, 1.25, h.z + 1.9); cam.setTarget(new B.Vector3(h.x, 0.75, h.z + 0.2)); }  // chest and the ground below in frame
+    else { cam.position.set(h.x + 0.7, h.y + 0.2, h.z + 1.45); cam.setTarget(new B.Vector3(h.x + 0.05, h.y - 0.08, h.z + 0.15)); }
+  }
+}
+function setCctv(far = false) {
+  const C = job.context;
+  if (far && C.views && C.views.cctv_far) { cctv.position.set(...C.views.cctv_far.pos); cctv.setTarget(new B.Vector3(...C.views.cctv_far.target)); return; }   // round 6: second mast distance
+  if (C.views && C.views.cctv) { cctv.position.set(...C.views.cctv.pos); cctv.setTarget(new B.Vector3(...C.views.cctv.target)); return; }
+  if (C.context === 'weapon') {
+    // the shooter seen from a mast: weapon at chest height pointing across the view
+    ctx.weapon.position.set(-0.4, 1.4, 0); ctx.weapon.rotationQuaternion = B.Quaternion.RotationAxis(B.Axis.Y, Math.PI / 2);
+    cctv.position.set(0, job.review.cctv.mount_height, job.review.cctv.distance); cctv.setTarget(new B.Vector3(0, 1.2, 0));
+  } else { const h = ctx.hit; cctv.position.set(h.x + 3, job.review.cctv.mount_height, h.z + job.review.cctv.distance); cctv.setTarget(new B.Vector3(h.x, 1.1, h.z)); }
+}
+
+function spawn(seed) {
+  retireAll(); rt.update(1e6); // retire anything left over
+  Math.random = mulberry32(seed);
+  let inst;
+  if (job.context.context === 'weapon') {
+    const s = ctx.sockets[job.effect.attach?.socket] || ctx.sockets.socket_muzzle;
+    inst = rt.spawnAtNode(job.effect, s, { ambient: amb() });
+  } else if (ctx.attachNode) {   // review.attach_node: ride the animated bone (follow), clip restarted with the effect
+    ctx.animT = ctx.anim ? ctx.anim.start : 0; if (ctx.anim) ctx.anim.pose(ctx.animT);
+    inst = rt.spawnAtNode(job.effect, ctx.attachNode, { ambient: amb(), inputs: job.context.inputs, follow: true });
+  } else inst = rt.spawnAtHit(job.effect, ctx.hit, ctx.normal, { ambient: amb(), inputs: job.context.inputs });
+  ctx.liveInst = inst; ctx.schedT = 0;
+  return inst;
+}
+
+async function grab() { return engine.getRenderingCanvas().toDataURL('image/png'); }
+// pixels as presented (after the post chain), top-down rows: decode the canvas like the strips do (engine.readPixels
+// can read a stale post-process target).
+async function pixels() {
+  const url = await grab(); const im = await new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.src = url; });
+  const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+  return { w: im.width, h: im.height, p: g.getImageData(0, 0, im.width, im.height).data };
+}
+
+/** Run one sequence: spawn at render 0, capture after the renders whose clock hits each time. -> [{t, url}] (+ counts). */
+async function sequence({ view, mode, times, cctvView = false, size, counts = false, decal = true, seed = 1234 }) {
+  if (size) engine.setSize(size[0], size[1]);
+  setMode(mode);
+  if (cctvView) { setCctv(cctvView === 'far'); scene.activeCamera = cctv; } else { setView(view); scene.activeCamera = cam; }
+  if (decal) placeDecal();
+  await ready();
+  const inst = spawn(seed);
+  const want = times.map((t) => Math.max(1, Math.round(t * 60)));
+  const last = counts ? Math.max(Math.ceil(job.effect.duration_s * 60) + 2, ...want) : Math.max(...want);
+  const shots = [], cnt = [];
+  for (let k = 1; k <= last; k++) {
+    scene.render();
+    if (counts) cnt.push(rt.activeCount());
+    if (want.includes(k)) shots.push({ t: k / 60, url: await grab() });
+  }
+  Math.random = nativeRandom;
+  retireAll(); rt.update(1e6);
+  return { shots, counts: cnt, inst };
+}
+
+// sheet: tiles with labels, composed in a 2D canvas
+async function sheet(items, cols, title) {
+  const imgs = await Promise.all(items.map((it) => new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.src = it.url; })));
+  const w = imgs[0].width, h = imgs[0].height, rows = Math.ceil(imgs.length / cols), top = 22;
+  const c = document.createElement('canvas'); c.width = w * cols; c.height = h * rows + top; const g = c.getContext('2d');
+  g.fillStyle = '#1b1c1c'; g.fillRect(0, 0, c.width, c.height); g.font = '13px monospace'; g.fillStyle = '#e6e2d6'; g.fillText(title, 6, 15);
+  imgs.forEach((im, i) => { const x = (i % cols) * w, y = top + Math.floor(i / cols) * h; g.drawImage(im, x, y); g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x, y + h - 18, w, 18); g.fillStyle = '#e6e2d6'; g.fillText(items[i].label, x + 5, y + h - 5); });
+  return c.toDataURL('image/png');
+}
+
+// ---------------------------------------------------------------- measurements
+async function measureClipped(view, mode, t) {
+  // effect region = pixels that change vs the same frame without the effect; clipped = luma >= clip after the grade
+  setMode(mode); setView(view); scene.activeCamera = cam; placeDecal(); await ready();
+  const k = Math.max(1, Math.round(t * 60));
+  if (ctx.anim) ctx.animT = ctx.anim.start + (k - 1) / 60;   // the base frame holds the same pose as the effect frame
+  scene.render(); const base = await pixels();
+  spawn(1234);
+  for (let i = 0; i < k; i++) scene.render();
+  const fx = await pixels(); retireAll(); rt.update(1e6);
+  // clipped = the effect drove a mid-tone pixel to white (base luma <= mid_luma). Pixels that were already near white
+  // (a pale kerb) clip under any additive sprite; they are reported as raw_pct, not gated.
+  let region = 0, clipped = 0, raw = 0; const clip = job.grade.clip_luma * 255, mid = (job.grade.mid_luma ?? 0.72) * 255;
+  const L = (p, i) => 0.2126 * p[i] + 0.7152 * p[i + 1] + 0.0722 * p[i + 2];
+  for (let i = 0; i < fx.p.length; i += 4) {
+    const d = Math.abs(fx.p[i] - base.p[i]) + Math.abs(fx.p[i + 1] - base.p[i + 1]) + Math.abs(fx.p[i + 2] - base.p[i + 2]);
+    if (d > 24) { region++; if (L(fx.p, i) >= clip) { raw++; if (L(base.p, i) <= mid) clipped++; } }
+  }
+  return { region_px: region, clipped_px: clipped, pct: region ? (100 * clipped) / region : 0, raw_pct: region ? (100 * raw) / region : 0 };
+}
+
+async function overdraw(view, t) {
+  // every particle quad adds 1/64 with a white texture: fragment layers per pixel (quad area, not alpha)
+  const unit = 1 / 64; const ort = createVfxRuntime(B, scene, { textureBase: '/vfx/', overdraw: true, overdrawUnit: unit, lights: false });
+  await ort.prepare([job.effect]);
+  const hidden = scene.meshes.filter((m) => m.isEnabled()); hidden.forEach((m) => m.setEnabled(false));
+  const cc = scene.clearColor.clone(); scene.clearColor = new B.Color4(0, 0, 0, 1); const fogm = scene.fogMode; scene.fogMode = 0;
+  pipeline.imageProcessingEnabled = false; pipeline.fxaaEnabled = false; cam.detachPostProcess(gradePP);
+  setView(view); scene.activeCamera = cam;
+  Math.random = mulberry32(1234);
+  if (ctx.attachNode && ctx.anim) { ctx.animT = ctx.anim.start; ctx.anim.pose(ctx.animT); }
+  let inst = job.context.context === 'weapon' ? ort.spawnAtNode(job.effect, ctx.sockets[job.effect.attach?.socket] || ctx.sockets.socket_muzzle) : ctx.attachNode ? ort.spawnAtNode(job.effect, ctx.attachNode, { inputs: job.context.inputs, follow: true }) : ort.spawnAtHit(job.effect, ctx.hit, ctx.normal, { inputs: job.context.inputs });
+  ctx.liveInst = inst; ctx.schedT = 0;
+  const k = Math.max(1, Math.round(t * 60)); for (let i = 0; i < k; i++) scene.render();
+  const px = await pixels(); Math.random = nativeRandom;
+  ort.dispose(); hidden.forEach((m) => m.setEnabled(true)); scene.clearColor = cc; scene.fogMode = fogm;
+  pipeline.imageProcessingEnabled = true; pipeline.fxaaEnabled = true; cam.attachPostProcess(gradePP);
+  let peak = 0, sum = 0, covered = 0; const { w, h, p } = px;
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); const img = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, o = i; const L = Math.round(p[i] / 255 / unit);
+    peak = Math.max(peak, L); sum += L; if (L > 0) covered++;
+    const s = Math.min(1, L / 16); // heat: black -> ochre -> pale at 16 layers
+    img.data[o] = 40 + 200 * s; img.data[o + 1] = 40 + 150 * s * s; img.data[o + 2] = 40 + 120 * s * s * s; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0); g.font = '13px monospace'; g.fillStyle = '#e6e2d6';
+  g.fillText(`overdraw t=${(k / 60).toFixed(3)}s  peak ${peak} layers  mean ${(sum / (w * h)).toFixed(3)} (fill)  covered ${(100 * covered / (w * h)).toFixed(1)}%  (16+ layers = pale)`, 6, 15);
+  return { url: c.toDataURL('image/png'), peak, fill: sum / (w * h), covered: covered / (w * h) };
+}
+
+// sheet orientation probe: each sheet's first and last cell as one big unlit fixed-frame sprite on black, no grade;
+// mean colour of covered pixels is compared with the PNG cells by vfx_cli (catches flipped rows / invertY).
+async function sheetProbe() {
+  const out = {}; const sheets = [...new Set(job.effect.emitters.map((e) => e.texture))];
+  const hidden = scene.meshes.filter((m) => m.isEnabled()); hidden.forEach((m) => m.setEnabled(false));
+  const cc = scene.clearColor.clone(); scene.clearColor = new B.Color4(0, 0, 0, 1); const fogm = scene.fogMode; scene.fogMode = 0;
+  pipeline.imageProcessingEnabled = false; pipeline.fxaaEnabled = false; cam.detachPostProcess(gradePP);
+  cam.position.set(0, 50, 2); cam.setTarget(new B.Vector3(0, 50, 0)); cam.fov = 0.8; scene.activeCamera = cam;
+  for (const tex of sheets) {
+    const T = job.effect.textures[tex]; const n = T.grid[0] * T.grid[1]; out[tex] = {};
+    for (const cell of [0, n - 1]) {
+      const def = { ...job.effect, id: 'probe_' + tex + cell, duration_s: 1, hooks: {}, lod: {}, emitters: [{ name: 'p', texture: tex, frame_mode: 'fixed', frames: [cell, cell], blend: 'alpha', billboard: 'camera',
+        shape: { type: 'point' }, bursts: [{ t: 0, count: 1 }], life_s: [5, 5], speed_mps: 0, size_m: [1.2, 1.2], color: [[0, '#FFFFFF', 1], [1, '#FFFFFF', 1]] }] };
+      const prt = createVfxRuntime(B, scene, { textureBase: '/vfx/', lights: false }); await prt.prepare([def]);
+      prt.spawn(def, { position: new B.Vector3(0, 50, 0) }); scene.render(); scene.render();
+      const px = await pixels(); let r = 0, g = 0, b = 0, k = 0;
+      for (let i = 0; i < px.p.length; i += 4) { const v = px.p[i] + px.p[i + 1] + px.p[i + 2]; if (v > 30) { r += px.p[i]; g += px.p[i + 1]; b += px.p[i + 2]; k++; } }
+      out[tex][cell] = k ? [r / k / 255, g / k / 255, b / k / 255, k] : null; prt.dispose();
+    }
+  }
+  hidden.forEach((m) => m.setEnabled(true)); scene.clearColor = cc; scene.fogMode = fogm; pipeline.imageProcessingEnabled = true; pipeline.fxaaEnabled = true; cam.attachPostProcess(gradePP);
+  return out;
+}
+
+window.run = async () => {
+  const j = job; const E = j.effect; const out = {}; const measure = {}; const [W, H] = j.review.size;
+  const isW = j.context.context === 'weapon';
+  const label = (t) => `t=${t.toFixed(3)}s`;
+  // strips day / night (counts measured on the day strip)
+  const d = await sequence({ view: 'strip', mode: 'day', times: j.times, counts: true, size: [W, H] });
+  out.strip_day = await sheet(d.shots.map((s) => ({ url: s.url, label: label(s.t) })), 4, `${E.id}  ${isW ? 'first-person eye, view-model FOV 54' : (j.context.label || 'impact at 1.6 m')}  DAY (overcast, S9 grade)`);
+  measure.counts = d.counts; measure.peak_particles = Math.max(0, ...d.counts);
+  const n = await sequence({ view: 'strip', mode: 'night', times: j.times, size: [W, H] });
+  out.strip_night = await sheet(n.shots.map((s) => ({ url: s.url, label: label(s.t) })), 4, `${E.id}  NIGHT (curfew: hemi ${j.review.night.hemi}, fluorescent floodlight)`);
+  if (isW) {
+    const s = await sequence({ view: 'side', mode: 'day', times: j.times.slice(0, 4), size: [W, H] });
+    out.side = await sheet(s.shots.map((x) => ({ url: x.url, label: label(x.t) })), 4, `${E.id}  side view of the weapon (scale and plume shape)`);
+  }
+  // context: bigger frames at the peak and mid-life
+  const ct = j.context.context_times || (isW ? [1 / 60, 2 / 60, 0.15, Math.min(E.duration_s * 0.4, 0.4)] : [1 / 60, 4 / 60, 0.2, Math.min(E.duration_s * 0.5, 0.6)]);
+  for (const mode of ['day', 'night']) {
+    const c = await sequence({ view: 'context', mode, times: ct, size: [W * 2, H * 2] });
+    out['context_' + mode] = await sheet(c.shots.map((x) => ({ url: x.url, label: label(x.t) })), 2, `${E.id}  ${isW ? 'eye view zoomed on the muzzle (FOV 13)' : (j.context.context_label || 'from 8 m, world FOV 75')}  ${mode.toUpperCase()}`);
+  }
+  // CCTV feed 320x240: day row + night row
+  const cc = j.context.cctv_times || [1 / 60, 3 / 60, 8 / 60, Math.min(0.5, E.duration_s * 0.5)];
+  const fd = await sequence({ cctvView: true, mode: 'day', times: cc, size: [320, 240] });
+  const fn = await sequence({ cctvView: true, mode: 'night', times: cc, size: [320, 240] });
+  const ff = j.context.views?.cctv_far ? await sequence({ cctvView: 'far', mode: 'day', times: cc, size: [320, 240] }) : { shots: [] };   // round 6: a farther mast by day
+  out.cctv = await sheet([...fd.shots.map((x) => ({ url: x.url, label: 'day ' + label(x.t) })), ...fn.shots.map((x) => ({ url: x.url, label: 'night ' + label(x.t) })), ...ff.shots.map((x) => ({ url: x.url, label: 'day ' + (j.context.cctv_far_label || 'far') + ' ' + label(x.t) }))], 4, `${E.id}  Governor CCTV (3.5 m mast, ${j.context.cctv_label || '9 m'}, 320x240, feed.ts treatment)`);
+  // measurements at strip size
+  engine.setSize(W * 2, H * 2);
+  const cl = [];
+  for (const mode of ['day', 'night']) for (const t of (j.context.clip_times || [1 / 60, 2 / 60, 4 / 60])) { const r = await measureClipped(isW ? 'context' : 'strip', mode, t); r.mode = mode; r.t = +t.toFixed(3); cl.push(r); }
+  measure.clipped = cl; measure.clipped_pct = +Math.max(...cl.map((c) => c.pct)).toFixed(2);
+  // overdraw: worst of several moments (flash, early, the estimate's fill peak, mid-life)
+  let od = null; const ots = [...new Set((j.context.overdraw_times || [1 / 60, 3 / 60, 8 / 60, Math.min(j.peak_t, E.duration_s * 0.9), E.duration_s * 0.4]).map((t) => Math.max(1, Math.round(t * 60)) / 60))];
+  measure.overdraw_samples = [];
+  for (const t of ots) { const o = await overdraw(j.context.views?.overdraw ? 'overdraw' : 'strip', t); measure.overdraw_samples.push([+t.toFixed(3), o.peak, +o.fill.toFixed(3)]); if (!od || o.fill > od.fill) od = o; }
+  out.overdraw = od.url; measure.overdraw_peak = Math.max(...measure.overdraw_samples.map((x) => x[1])); measure.overdraw_fill = +od.fill.toFixed(3); measure.overdraw_covered = +od.covered.toFixed(4);
+  measure.sheet_probe = await sheetProbe();
+  return { files: out, measure };
+};
+window.bootReady = true;
+</script>
+</body>
+</html>

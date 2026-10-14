@@ -1,0 +1,15 @@
+{
+  "name": "cmu",
+  "description": "CMU Graphics Lab mocap, cgspeed/B. Hahne MotionBuilder-friendly BVH release (2010). Frame 0 is an added T-pose facing +Z; 120 fps; units ~ inches/2.54-ish (scale is derived from leg length).",
+  "rest_frame": 0,
+  "source_fps": 120,
+  "licence": "CMU: free to use, may be included in commercially sold products, may not be resold as data even converted. Credit: 'The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217.'",
+  "notes": "Hands are one bone plus stub finger/thumb joints: leave fingers unmapped so the relaxed hand pose is used. LHipJoint/RHipJoint and Neck1 are dropped (world-space retarget keeps their effect). Many takes start and end with the actor standing: trim.",
+  "bones": {
+    "hips": "Hips", "spine": "LowerBack", "chest": "Spine", "upper_chest": "Spine1", "neck": "Neck", "head": "Head",
+    "shoulder_l": "LeftShoulder", "upper_arm_l": "LeftArm", "lower_arm_l": "LeftForeArm", "hand_l": "LeftHand",
+    "shoulder_r": "RightShoulder", "upper_arm_r": "RightArm", "lower_arm_r": "RightForeArm", "hand_r": "RightHand",
+    "upper_leg_l": "LeftUpLeg", "lower_leg_l": "LeftLeg", "foot_l": "LeftFoot", "toes_l": "LeftToeBase",
+    "upper_leg_r": "RightUpLeg", "lower_leg_r": "RightLeg", "foot_r": "RightFoot", "toes_r": "RightToeBase"
+  }
+}

@@ -1,0 +1,457 @@
+{
+  "project": "CHANGE_ME",
+  "spec_source": "Transcribe from the project delivery-spec document; see references/project-spec.md. Values below are a working example (a Babylon browser game).",
+  "engine": "babylon",
+  "axes": {
+    "blender_up": "Z",
+    "blender_front": "-Y",
+    "gltf_front": "+Z",
+    "export_yup": true
+  },
+  "units_m": 1.0,
+  "reference_dims_m": {
+    "human": 1.75,
+    "eye": 1.62,
+    "door": [
+      0.9,
+      2.1
+    ],
+    "floor_to_floor": 3.2,
+    "curb": 0.15,
+    "street_lamp": 6.0,
+    "camera_mount": 3.5
+  },
+  "paths": {
+    "export": "export",
+    "placeholder": "export/_placeholder",
+    "src": "src",
+    "tex": "src/tex",
+    "review": "review",
+    "manifest": "manifest.json",
+    "licenses": "LICENSES.md",
+    "materials": "materials.json",
+    "materials_dir": "materials"
+  },
+  "naming": {
+    "id_regex": "^[a-z][a-z0-9_]*[a-z0-9]$",
+    "node_regex": "^[a-z][a-z0-9_]*$",
+    "material_regex": "^m_[a-z0-9_]+$",
+    "texture_regex": "^t_[a-z0-9_]+_(bc|n|orm|e)$",
+    "lod_suffix": "_lod{n}",
+    "col_suffix": "_col",
+    "broken_suffix": "_broken",
+    "texture_note": "t_<asset id>_<slot> for unique sets; t_<library name>_<slot> for library materials"
+  },
+  "categories": {
+    "env": {
+      "prefix": "env_",
+      "export_dir": "env",
+      "src_dir": "env",
+      "pivot": "bottom_left_back",
+      "budget_class": "kit",
+      "density_class": "kit",
+      "lightmap_uv": true,
+      "colliders": [
+        "mesh"
+      ],
+      "grid": {
+        "major": 1.0,
+        "minor": 0.25
+      },
+      "required_props": []
+    },
+    "state": {
+      "prefix": "state_",
+      "export_dir": "state",
+      "src_dir": "props",
+      "pivot": "bottom_center",
+      "budget_class": "prop",
+      "density_class": "prop",
+      "lightmap_uv": false,
+      "colliders": [
+        "mesh",
+        "box",
+        "convex"
+      ],
+      "required_props": [
+        "ig_attach"
+      ]
+    },
+    "prop": {
+      "prefix": "prop_",
+      "export_dir": "props",
+      "src_dir": "props",
+      "pivot": "bottom_center",
+      "budget_class": "prop",
+      "density_class": "prop",
+      "lightmap_uv": true,
+      "colliders": [
+        "mesh",
+        "box",
+        "convex"
+      ],
+      "required_props": []
+    },
+    "phys": {
+      "prefix": "phys_",
+      "export_dir": "phys",
+      "src_dir": "props",
+      "pivot": "center_of_mass",
+      "budget_class": "prop",
+      "density_class": "prop",
+      "lightmap_uv": false,
+      "colliders": [
+        "convex",
+        "box"
+      ],
+      "required_props": [
+        "ig_mass",
+        "ig_material"
+      ]
+    },
+    "wpn": {
+      "prefix": "wpn_",
+      "export_dir": "props",
+      "src_dir": "props",
+      "pivot": "custom",
+      "budget_class": "hero",
+      "density_class": "prop",
+      "lightmap_uv": false,
+      "colliders": [],
+      "required_props": []
+    },
+    "char": {
+      "prefix": "char_",
+      "export_dir": "char",
+      "src_dir": "char",
+      "pivot": "bottom_center",
+      "budget_class": "char_body",
+      "density_class": "char_body",
+      "lightmap_uv": false,
+      "colliders": [],
+      "required_props": []
+    },
+    "dec": {
+      "prefix": "dec_",
+      "export_dir": "dec",
+      "src_dir": "env",
+      "pivot": "bottom_center",
+      "budget_class": "decal",
+      "density_class": "prop",
+      "lightmap_uv": false,
+      "colliders": [],
+      "required_props": []
+    }
+  },
+  "budgets": {
+    "kit": 3000,
+    "prop": 2000,
+    "hero": 6000,
+    "vehicle": 15000,
+    "char_body": 30000,
+    "char_head": 12000,
+    "decal": 200
+  },
+  "texel_density": {
+    "kit": 256,
+    "prop": 512,
+    "hero": 512,
+    "char_body": 512,
+    "char_head": 1024,
+    "roof": 128,
+    "distance": 128
+  },
+  "texel_density_tolerance": 0.35,
+  "lod": {
+    "min_tris": 500,
+    "ratios": [
+      1.0,
+      0.4,
+      0.15
+    ],
+    "ratio_tolerance": 0.12
+  },
+  "collision": {
+    "prop": "ig_collider",
+    "kinds": [
+      "box",
+      "convex",
+      "mesh"
+    ],
+    "max_convex_verts": 64
+  },
+  "uv": {
+    "uv0": "UVMap",
+    "uv1": "Lightmap",
+    "lightmap_res": 1024,
+    "lightmap_padding_px": 4
+  },
+  "textures": {
+    "max_px": 2048,
+    "power_of_two": true,
+    "format": "png",
+    "normal_convention": "opengl",
+    "embed": true,
+    "loose_copy": true
+  },
+  "materials": {
+    "workflow": "metallic_roughness",
+    "max_kit_material_sets": 8,
+    "alpha": {
+      "MASK": [
+        "foliage",
+        "fence",
+        "wire",
+        "grate",
+        "hedge",
+        "weed",
+        "leaf"
+      ],
+      "BLEND": [
+        "glass",
+        "decal",
+        "dec_"
+      ]
+    },
+    "albedo_srgb_min": 0.02,
+    "albedo_srgb_max": 0.94,
+    "albedo_clip_fraction_max": 0.005,
+    "roughness_min_mean": 0.45
+  },
+  "palette": {
+    "swatches": {
+      "slab": "#8A8B86",
+      "cast": "#5E605C",
+      "soot": "#3A3B39",
+      "ochre_brick": "#7A6A55",
+      "overcast": "#B9BDBE",
+      "haze": "#8E9496",
+      "ministry_ochre": "#B8742A",
+      "ministry_ink": "#1F2A33",
+      "fluorescent": "#CFE3DC",
+      "chalk": "#E6E2D6",
+      "charcoal": "#1A1A1A",
+      "tungsten": "#E8C88A",
+      "dried_blood": "#5A1E1A"
+    },
+    "max_saturation": 0.38,
+    "accent_rules": [
+      {
+        "name": "ministry_ochre",
+        "hex": "#B8742A",
+        "hue_tolerance_deg": 14,
+        "min_saturation": 0.55,
+        "allowed_material_regex": "^m_state_",
+        "allowed_asset_regex": "^state_",
+        "why": "S3: ministry ochre only on things the state put there (min sat/value keep ordinary brown wood, kraft and brick out of the rule)",
+        "min_value": 0.5
+      },
+      {
+        "name": "chalk",
+        "hex": "#E6E2D6",
+        "hue_tolerance_deg": 30,
+        "min_saturation": 0.0,
+        "min_value": 0.86,
+        "allowed_material_regex": "^m_rebel_",
+        "allowed_asset_regex": "^(dec_rebel|char_rebel)",
+        "why": "S3: chalk only on things rebels did"
+      }
+    ]
+  },
+  "physics": {
+    "materials": [
+      "wood",
+      "metal",
+      "concrete",
+      "glass",
+      "cloth",
+      "plastic",
+      "cardboard"
+    ],
+    "density_kg_m3": {
+      "wood": 450,
+      "metal": 7800,
+      "concrete": 2300,
+      "glass": 2500,
+      "cloth": 300,
+      "plastic": 950,
+      "cardboard": 200
+    },
+    "mass_guide_kg": {
+      "bottle": 0.5,
+      "chair": 6,
+      "crate_wood": 15,
+      "oil_drum": 40,
+      "filing_cabinet": 60,
+      "dumpster": 300
+    }
+  },
+  "prop_schema": {
+    "ig_mass": "number>0",
+    "ig_material": "enum:physics.materials",
+    "ig_health": "number>0",
+    "ig_flammable": "bool",
+    "ig_explosive": "bool",
+    "ig_hinge": "vec3",
+    "ig_hinge_axis": "vec3",
+    "ig_attach": "enum:ground,wall,pole,ceiling",
+    "ig_footprint": "vec2",
+    "ig_collider": "enum:collision.kinds"
+  },
+  "coordinate_props": [
+    "ig_hinge",
+    "ig_hinge_axis"
+  ],
+  "sockets": {
+    "prefix": "socket_",
+    "forward": "blender_local_+Y (glTF local -Z)",
+    "required": {
+      "state_camera_": [
+        "socket_view"
+      ],
+      "state_loudspeaker": [
+        "socket_speaker"
+      ]
+    }
+  },
+  "states": {
+    "state_camera_": [
+      "_intact",
+      "_sabotaged"
+    ]
+  },
+  "skeleton": {
+    "ref": "src/char/skeleton_ref.blend",
+    "max_bones": 72,
+    "max_influences": 4,
+    "bones": [
+      "root",
+      "hips",
+      "spine",
+      "chest",
+      "upper_chest",
+      "neck",
+      "head",
+      "eye_l",
+      "eye_r",
+      "shoulder_l",
+      "shoulder_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "lower_arm_l",
+      "lower_arm_r",
+      "hand_l",
+      "hand_r",
+      "thumb_01_l",
+      "thumb_02_l",
+      "thumb_03_l",
+      "index_01_l",
+      "index_02_l",
+      "index_03_l",
+      "middle_01_l",
+      "middle_02_l",
+      "middle_03_l",
+      "ring_01_l",
+      "ring_02_l",
+      "ring_03_l",
+      "pinky_01_l",
+      "pinky_02_l",
+      "pinky_03_l",
+      "thumb_01_r",
+      "thumb_02_r",
+      "thumb_03_r",
+      "index_01_r",
+      "index_02_r",
+      "index_03_r",
+      "middle_01_r",
+      "middle_02_r",
+      "middle_03_r",
+      "ring_01_r",
+      "ring_02_r",
+      "ring_03_r",
+      "pinky_01_r",
+      "pinky_02_r",
+      "pinky_03_r",
+      "upper_leg_l",
+      "upper_leg_r",
+      "lower_leg_l",
+      "lower_leg_r",
+      "foot_l",
+      "foot_r",
+      "toes_l",
+      "toes_r",
+      "attach_hand_r",
+      "attach_hand_l",
+      "attach_back",
+      "attach_hip_r",
+      "attach_head"
+    ],
+    "blendshapes_required_head": [
+      "jawOpen",
+      "eyeBlinkLeft",
+      "eyeBlinkRight",
+      "browInnerUp",
+      "browDownLeft",
+      "browDownRight",
+      "mouthFrownLeft",
+      "mouthFrownRight",
+      "eyeWideLeft",
+      "eyeWideRight",
+      "mouthPucker",
+      "mouthSmileLeft",
+      "mouthSmileRight",
+      "viseme_aa",
+      "viseme_ee",
+      "viseme_oh",
+      "viseme_ff",
+      "viseme_mm"
+    ]
+  },
+  "review": {
+    "background": "#8E9496",
+    "ground": "#5E605C",
+    "fog": {
+      "color": "#8E9496",
+      "start": 25,
+      "end": 140
+    },
+    "exposure": 1.0,
+    "hdri": null,
+    "mannequin_height": 1.75,
+    "views": [
+      "front",
+      "three_quarter",
+      "eye",
+      "iso",
+      "feed",
+      "lods",
+      "collision",
+      "uv_density"
+    ],
+    "feed": {
+      "label": "CAM",
+      "res": [
+        320,
+        240
+      ],
+      "tint": "#9FC7A8",
+      "scanlines": true,
+      "mount_height": 3.5,
+      "distance": 9
+    },
+    "iso": {
+      "elevation_deg": 50,
+      "azimuth_deg": 45
+    }
+  },
+  "manifest_fields": [
+    "id",
+    "path",
+    "category",
+    "tier",
+    "status",
+    "source",
+    "license",
+    "notes"
+  ]
+}

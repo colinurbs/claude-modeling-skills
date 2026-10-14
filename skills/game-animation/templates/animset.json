@@ -1,0 +1,49 @@
+{
+  "id": "anim_SET",
+  "status": "wip",
+  "tier": "S",
+  "notes": "",
+  "sources": {
+    "take_key": {
+      "file": "_sources/take.bvh",
+      "mapping": "auto",
+      "rest_frame": null,
+      "kind": "mocap",
+      "credit": "who captured / converted it",
+      "url": "",
+      "license": "CC0 | CC-BY 4.0 (credit ...) | Mixamo/Adobe | CMU mocap terms",
+      "acquired": "YYYY-MM-DD",
+      "foot_pitch": "stance",
+      "ground": "contacts"
+    }
+  },
+  "defaults": {"foot_lock": true, "ground_clamp": true},
+  "clips": [
+    {
+      "name": "anim_walk_f_loop",
+      "source": "take_key",
+      "range": "auto", "window_s": [0.0, 10.0], "period_s": [0.8, 1.4],
+      "loop": true, "root_motion": true, "root_yaw": "constant",
+      "direction": "f", "speed_band": "walk",
+      "tags": ["locomotion", "civilian"],
+      "notes": "Intent: what the Governor's camera must read (e.g. 'unhurried, going somewhere, feet plant')."
+    },
+    {
+      "name": "anim_hands_up",
+      "source": "take_key",
+      "frames": [120, 180],
+      "loop": false, "root_motion": false,
+      "tags": ["action", "fear"],
+      "notes": "Intent: fast and total (S8 'Fear is physical')."
+    },
+    {
+      "name": "anim_add_lean",
+      "source": "take_key",
+      "frames": [300, 302],
+      "loop": false, "additive": true, "base": "anim_idle_a_loop",
+      "tags": ["additive"],
+      "notes": "3 frames: lean left / neutral / right, deltas from frame 1 re-based on the base's first frame."
+    }
+  ],
+  "review": {"video": false}
+}

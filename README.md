@@ -1,13 +1,30 @@
-# blender-modeling-skills
+# claude-modeling-skills
 
-A [Claude Code](https://claude.com/claude-code) skill for modeling **real-world objects in
-Blender from reference images**. It aims for accurate proportions, correct 3D form and clean
-topology, rather than a stack of boxes or a flat extruded slab.
+[Claude Code](https://claude.com/claude-code) skills for making 3D game content with measured
+gates instead of "looks right" verdicts. Five skills share one idea: every phase has to pass
+numeric checks (dimensions, silhouettes, triangle budgets, validators, headless engine renders)
+before the next one starts, and a separate fresh-eyes critic reviews the result with no stake
+in calling it done.
 
-Claude drives a live Blender session through the
-[BlenderMCP](https://github.com/ahujasid/blender-mcp) server. The skill's main idea is that
-**measured numbers, not screenshots, decide when something is done**. Every phase has to
-pass numeric gates before the next one starts:
+| Skill | What it makes | Proves it with |
+|---|---|---|
+| `reference-modeling` | real-world objects in Blender from reference images | dimension and silhouette gates, extent profiles, mesh report |
+| `game-asset-modeling` | engine-ready glTF: kit pieces, props, vehicles, weapons, decals, characters | triangle budgets, UV checks, the Khronos validator, Babylon review renders |
+| `game-animation` | game clips from open motion capture on a shared skeleton, incl. first-person sets | loop seams, foot slide, joint limits, engine playback |
+| `game-vfx` | particle effects as portable JSON plus painted flipbook sheets | schema and budget validation, overdraw and frame-strip review |
+| `game-ui` | icon sets, nine-slice panels, templates, design tokens, licensed fonts | palette and legibility gates, headless review at game size |
+
+The four `game-*` skills were built for one project (an asymmetric police-state game with a
+Babylon web console and a Godot first-person client) and carry its conventions in their
+references; the pipelines, validators and review harnesses are general.
+
+## reference-modeling
+
+Model **real-world objects in Blender from reference images**, aiming for accurate
+proportions, correct 3D form and clean topology rather than a stack of boxes or a flat
+extruded slab. Claude drives a live Blender session through the
+[BlenderMCP](https://github.com/ahujasid/blender-mcp) server. Every phase has to pass
+numeric gates before the next one starts:
 
 | Gate | What it checks |
 |------|----------------|
@@ -16,9 +33,6 @@ pass numeric gates before the next one starts:
 | `extent_profile` | Cross-section width sampled along the part, which catches the "uniform slab" failure |
 | `landmark_delta` | Interior features that no silhouette shows |
 | `mesh_report` | ngons, non-manifold edges, loose verts |
-
-A separate "fresh-eyes critic" subagent reviews zoomed renders. It has no stake in calling
-the model finished.
 
 ## What's in it
 
@@ -57,19 +71,26 @@ skills/reference-modeling/
 ## Install
 
 ```bash
-git clone <this repo>
+git clone git@github.com:colinurbs/claude-modeling-skills.git
 mkdir -p ~/.claude/skills
-ln -s "$PWD/blender-modeling-skills/skills/reference-modeling" ~/.claude/skills/reference-modeling
+for s in reference-modeling game-asset-modeling game-animation game-vfx game-ui; do
+  ln -s "$PWD/claude-modeling-skills/skills/$s" ~/.claude/skills/$s
+done
+# the game skills' review and validation tooling (Babylon, Playwright, the Khronos validator)
+sh ~/.claude/skills/game-asset-modeling/tools/setup.sh
 ```
 
-Code blocks in `SKILL.md` load helpers from `~/.claude/skills/reference-modeling/scripts`.
-If you install the skill elsewhere (for example a project's `.claude/skills/`), update that
-path.
+Code blocks in the skills load helpers from `~/.claude/skills/<skill>/scripts` and
+`.../tools`. If you install a skill elsewhere (for example a project's `.claude/skills/`),
+update that path. The `game-*` skills read a project's `assets/spec.json`, `ASSETS.md` and
+`assets/manifest.json` for budgets, naming and delivery status; see each `SKILL.md`.
 
 ### Requirements
 
-- **Blender 4.x–5.x** with the **BlenderMCP** add-on running (sidebar `N` → BlenderMCP →
-  Start), and the BlenderMCP server configured in Claude Code. Tested on Blender 5.1.
+- **Blender 4.x–5.x**. `reference-modeling` needs the **BlenderMCP** add-on running (sidebar
+  `N` → BlenderMCP → Start) and the BlenderMCP server configured in Claude Code; the `game-*`
+  skills drive Blender headless from the command line. Tested on Blender 5.1.
+- **Node 20+** for the game skills' tooling (`tools/setup.sh` installs it).
 - For the offline helpers, run `pip install -r requirements.txt` (numpy, scipy, pillow,
   opencv-python-headless, scikit-image).
 - Web access, so Claude can find reference images.
@@ -80,8 +101,16 @@ Ask Claude Code something like:
 
 > model a Stanley No. 4 hand plane in Blender from references, as realistic as you can
 
-The skill triggers on requests to model a recognizable real object, to set up reference or
-blueprint images, or when a model "looks blocky/flat/fake".
+> build the delivery truck from ASSETS.md as a static blocker, with LODs and a collider
+
+> retarget this CMU walk onto our skeleton as a seamless loop with root motion
+
+> make the muzzle flash and the tear-gas volume for the riot launcher
+
+> design the dossier template and the unit icon set for the control room
+
+Each skill triggers on its own kind of request; the descriptions in the `SKILL.md`
+frontmatter say what counts.
 
 ## Honest limits
 

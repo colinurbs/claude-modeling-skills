@@ -1,0 +1,283 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>game-ui review</title>
+<!-- game-ui review harness. Builds review plates from the job (tokens, fonts, icon sets, nine-slices, templates) at
+     device scale 1, the size the game draws them. Everything the plates show comes from the exported files; the only
+     invented CSS here is the CRT treatment and the typewriter inking, both driven by ui_tokens (crt, paper). -->
+<link rel="stylesheet" href="/export/ui/ui_tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ui-desk); color: var(--ui-engrave); width: 1600px; }
+  .plate { width: 1600px; padding: 20px 24px 24px; background: var(--ui-desk); position: relative; overflow: hidden; }
+  .plate > h2 { margin: 0 0 14px; font: 500 11px/1.2 var(--ui-font-state); letter-spacing: .06em; text-transform: uppercase; color: var(--ui-engrave); }
+  .tech { font: 400 10px/1.2 ui-monospace, Menlo, monospace; color: var(--ui-engrave); opacity: .9; }
+  .screen { background: var(--ui-screen); color: var(--ui-phosphor); position: relative; }
+  .paper { background: var(--ui-paper); color: var(--ui-ministry-ink); }
+  .row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .ico { display: inline-block; line-height: 0; }
+  .ico svg { width: 100%; height: 100%; display: block; }
+  .cell { display: grid; justify-items: center; gap: 6px; width: 92px; padding: 8px 0; }
+  .sizes { display: flex; gap: 10px; align-items: end; }
+  .zoom img { image-rendering: pixelated; }
+  /* CRT treatment from ui_tokens.crt */
+  .crt { position: relative; }
+  .crt .glow { filter: drop-shadow(0 0 var(--glow) rgba(224,160,48,var(--glowa))); }
+  .crt::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(16,18,20,var(--scan)) 0 1px, transparent 1px var(--scanp)); }
+  .crt::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2; background: radial-gradient(ellipse at center, transparent 55%, rgba(16,18,20,var(--vig)) 100%); }
+  .flick { opacity: .35; }
+  .inverse { background: var(--ui-phosphor); color: var(--ui-screen); }
+  /* nine-slice via border-image (the ig_ui_nine css field) */
+  .nine { position: relative; }
+  .slot { position: absolute; overflow: hidden; white-space: nowrap; }
+  .tw > span { display: inline-block; } .tw > span > span { display: inline-block; }
+  .stamp { position: absolute; border: 2px solid var(--ui-dried-blood); color: var(--ui-dried-blood); font: 700 18px/1 var(--ui-font-state); letter-spacing: .08em; text-transform: uppercase; display: flex; align-items: center; justify-content: center; opacity: .88; mix-blend-mode: multiply; }
+  .feedimg { position: absolute; background-size: cover; background-position: center 30%; filter: grayscale(1) contrast(1.15) brightness(.95); }
+  .feedimg::after { content: ''; position: absolute; inset: 0; background: rgba(159,199,168,.28); mix-blend-mode: multiply; }
+  .feedimg::before { content: ''; position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(to bottom, rgba(16,18,20,.25) 0 1px, transparent 1px 2px); }
+  .burn { position: absolute; z-index: 2; font: 500 11px/1 var(--ui-font-state); letter-spacing: .04em; color: var(--ui-fluorescent); font-variant-numeric: tabular-nums; }
+  .photo { position: absolute; background-size: cover; background-position: center 35%; filter: grayscale(1) contrast(1.25); mix-blend-mode: multiply; }
+  .swatch { width: 180px; padding: 8px; border: 1px solid var(--ui-bezel-light); }
+  .key { width: 74px; height: 62px; background: var(--ui-bezel); border: 1px solid var(--ui-bezel-dark); position: relative; padding: 6px 8px; color: var(--ui-engrave); }
+  .key .ico { position: absolute; right: 8px; top: 8px; color: var(--ui-phosphor-dim); }
+  .key.on .ico { color: var(--ui-phosphor); }
+  .key b { font: 700 15px/1 var(--ui-font-state); display: block; }
+  .key > span:not(.ico) { position: absolute; left: 8px; bottom: 6px; font: 500 11px/1 var(--ui-font-state); letter-spacing: .06em; text-transform: uppercase; }
+</style></head>
+<body>
+<div id="root"></div>
+<script type="module">
+const job = await (await fetch('/job.json')).json();
+const T = job.tokens, C = T.color, S = T.type.scale;
+const A = Object.fromEntries(job.assets.map((a) => [a.id, a]));
+const root = document.getElementById('root');
+const crt = T.crt;
+document.documentElement.style.cssText += `--glow:${crt.glow_px}px;--glowa:${crt.glow_opacity};--scan:${crt.scanline_opacity};--scanp:${crt.scanline_period_px}px;--vig:${crt.vignette};`;
+const plates = []; const fits = [];
+for (const f of Object.values(T.type.families)) for (const wgt of [400, 500, 700]) await document.fonts.load(`${wgt} 13px "${f.family}"`);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+const plate = (name, title, assets) => { const p = el('section', 'plate'); p.id = 'plate-' + name; p.append(el('h2', '', title)); root.append(p); plates.push({ name, title, assets }); return p; };
+const L = (k) => (job.copy.labels?.[k]?.en) ?? k;
+const style = (s) => { const st = S[s]; return `font:${st.weight} ${st.size}px/${st.line} var(--ui-font-${st.family});letter-spacing:${st.tracking_em}em;${st.case === 'upper' ? 'text-transform:uppercase;' : ''}${st.family === 'state' ? 'font-variant-numeric:tabular-nums;' : ''}`; };
+const roleFg = (r) => C[T.roles[r].fg];
+
+// seeded typewriter inking (ui_tokens.paper.typewriter)
+const hash = (s) => { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+const rnd = (seed) => () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+function typed(text) {
+  const tw = T.paper.typewriter, r = rnd(hash(text)); const w = el('span', 'tw');
+  for (const [wi, word] of text.split(' ').entries()) {
+    if (wi) w.append(document.createTextNode(' '));
+    const wd = el('span'); wd.style.whiteSpace = 'nowrap';
+    for (const ch of word) { const s = el('span'); s.textContent = ch; const o = tw.opacity[0] + (tw.opacity[1] - tw.opacity[0]) * r();
+      s.style.opacity = o.toFixed(2); s.style.transform = `translate(${((r() - .5) * 2 * tw.x_jitter_px).toFixed(2)}px, ${((r() - .5) * 2 * tw.baseline_jitter_px).toFixed(2)}px)`;
+      if (r() < tw.heavy_strike_prob) s.style.textShadow = '0.35px 0 0 currentColor'; wd.append(s); }
+    w.append(wd);
+  }
+  return w;
+}
+const svgCache = {};
+async function icon(set, name, px, color) {
+  const a = A[set].json; const key = a.icons[name]['svg_' + px] ?? a.icons[name].svg;   // hand-hinted master at this size if the set has one
+  svgCache[key] ??= await (await fetch('/export/ui/icons/' + key)).text();
+  const e = el('span', 'ico', svgCache[key]); e.style.width = e.style.height = px + 'px'; if (color) e.style.color = color; return e;
+}
+function nine(id, w, h, variant) {
+  const n = A[id].json, s = n.slice; const e = el('div', 'nine');
+  const img = variant && n.variants?.[variant] ? n.variants[variant]['1'] : n.images['1'];
+  const dir = { panel: 'panels', template: 'templates' }[A[id].kind] ?? A[id].kind + 's';
+  e.style.cssText = `width:${w}px;height:${h}px;border-style:solid;border-width:${s.t}px ${s.r}px ${s.b}px ${s.l}px;border-image:url(/export/ui/${dir}/${img}) ${s.t} ${s.r} ${s.b} ${s.l} ${n.center === 'hollow' ? '' : 'fill'} / ${s.t}px ${s.r}px ${s.b}px ${s.l}px ${n.edges === 'tile' ? 'repeat' : 'stretch'};`;
+  e.style.willChange = 'transform'; e._n = n; e._w = w; e._h = h; return e;
+}
+// place a slot from the layout json on a nine-slice element of size (w, h), honouring anchor and stretch
+function slotRect(n, sl, w, h) {
+  let [x, y, sw, sh] = sl.rect; const [W, H] = n.size; const st = sl.stretch || '';
+  if (st.includes('x') || sl.anchor === 'stretch') sw += w - W;
+  if (st.includes('y') || sl.anchor === 'stretch') sh += h - H;
+  if (sl.anchor === 'tr' || sl.anchor === 'br') x += w - W;
+  if (sl.anchor === 'bl' || sl.anchor === 'br') y += h - H;
+  return [x, y, sw, sh];
+}
+function lens(slot, lit) { const d = el('div'); d.style.cssText = `position:absolute;left:1px;top:1px;width:6px;height:6px;border-radius:50%;border:1px solid ${C.bezel_dark};background:${lit ? `radial-gradient(circle at 40% 35%, ${C.tungsten} 0 1px, ${C.phosphor} 2px, ${C.phosphor_dim} 3px)` : C.bezel_dark};`; slot.append(d); }
+function tick(n, pr, sev) { n.slots.find((s) => s.id === 'priority').boxes.forEach(([bx, by, bw, bh], k) => { if (k === sev - 1) { const x = el('span', '', 'X'); x.style.cssText = `position:absolute;left:${bx}px;top:${by - 2}px;width:${bw}px;text-align:center;${style('type_small')}font-weight:700;`; pr.append(x); } }); }
+function put(host, n, id, w, h, child, extra = '') {
+  const sl = n.slots.find((s) => s.id === id); const [x, y, sw, sh] = slotRect(n, sl, w, h);
+  const d = el('div', 'slot'); const s = n.slice;
+  d.style.cssText = `left:${x - s.l}px;top:${y - s.t}px;width:${sw}px;height:${sh}px;${sl.style ? style(sl.style) : ''}${sl.role ? 'color:' + roleFg(sl.role) + ';' : ''}${extra}`;
+  if (child instanceof Node) d.append(child); else if (child != null) d.textContent = child;
+  host.append(d); if (sl.kind === 'text') requestAnimationFrame(() => fits.push({ asset: n.id, slot: id, overflow_x: d.scrollWidth > d.clientWidth + 1, overflow_y: d.scrollHeight > d.clientHeight + 1, w: d.clientWidth, sw: d.scrollWidth }));
+  return d;
+}
+
+// ------------------------------------------------------------------ plates
+const sets = job.assets.filter((a) => a.kind === 'iconset');
+const groupsOf = (a) => { const g = {}; for (const [n, m] of Object.entries(a.json.icons)) (g[m.group] ??= []).push(n); return g; };
+
+for (const set of sets.filter((s) => s.json.atlases.phos)) {   // sets that declare their own variants (no phos atlas, e.g. rebel chalk) bring their own plates (src/ui/_review)
+  // 1. icons at game size on the screen
+  const p = plate('icons_screen', `${set.id}: phosphor on screen at 16 / 24 / 32 px (device scale 1), then the 24 px atlas frame at 4x`, [set.id]);
+  const box = el('div', 'screen'); box.style.padding = '12px'; p.append(box);
+  for (const [g, names] of Object.entries(groupsOf(set))) {
+    const r = el('div', 'row'); r.style.marginBottom = '6px';
+    for (const n of names.sort()) {
+      const c = el('div', 'cell'); const sz = el('div', 'sizes');
+      for (const px of job.review.icon_sizes_px) sz.append(await icon(set.id, n, px, C.phosphor));
+      c.append(sz); c.append(el('div', 'tech', n)); r.append(c);
+    }
+    box.append(r);
+  }
+  const at = set.json.atlases.phos['1']; const z = el('div', 'row zoom'); z.style.marginTop = '12px';
+  for (const n of Object.keys(set.json.icons).sort().slice(0, 16)) {
+    const f = at.frames[n]; const c = el('div'); c.style.cssText = `width:${f.w * 4}px;height:${f.h * 4}px;background:url(/export/ui/icons/${at.image}) -${f.x * 4}px -${f.y * 4}px / ${at.size[0] * 4}px ${at.size[1] * 4}px;image-rendering:pixelated;background-color:${C.screen};`;
+    z.append(c);
+  }
+  p.append(z);
+
+  // 2. CRT treatment, states, and markers over a map
+  const q = plate('icons_crt', `${set.id}: CRT/phosphor treatment (ui_tokens.crt) at 24 px; normal / dim / flicker step / inverse; markers over a dark map`, [set.id, 'ui_tokens']);
+  const scr = el('div', 'screen crt'); scr.style.cssText = 'padding:16px;height:380px;'; q.append(scr);
+  const grid = el('div'); grid.style.cssText = `position:absolute;inset:0;background-image:linear-gradient(${C.phosphor_faint} 1px, transparent 1px),linear-gradient(90deg, ${C.phosphor_faint} 1px, transparent 1px);background-size:48px 48px;opacity:.35;`; scr.append(grid);
+  const states = [['normal', C.phosphor, ''], ['dim', C.phosphor_dim, ''], ['flicker', C.phosphor, 'flick'], ['inverse', C.screen, 'inverse']];
+  let yy = 16;
+  for (const [lab, col, cls] of states) {
+    const r = el('div', 'row glow'); r.style.cssText = `position:absolute;left:16px;top:${yy}px;gap:10px;`; r.append(el('div', 'tech', lab));
+    for (const n of ['tool_patrol', 'tool_sweep', 'tool_checkpoint', 'tool_detain', 'tool_lockdown', 'tool_curfew', 'tool_broadcast', 'tool_riot', 'tool_camera', 'tool_mark'].filter((n) => set.json.icons[n])) {
+      const i = await icon(set.id, n, 24, col); if (cls) { i.classList.add(cls); if (cls === 'inverse') i.style.padding = '2px'; } r.append(i);
+    }
+    scr.append(r); yy += 40;
+  }
+  const marks = [['unit_officer', 820, 60], ['unit_officer', 980, 210], ['unit_riot', 1120, 120], ['unit_camera', 700, 240], ['unit_camera_dead', 1300, 70], ['mark_subject', 900, 150], ['mark_lastseen', 1030, 300], ['mark_waypoint', 860, 300], ['obj_radio', 1400, 220], ['obj_prison', 1240, 300], ['obj_official', 760, 120]];
+  for (const [n, x, y] of marks) { if (!set.json.icons[n]) continue; const i = await icon(set.id, n, 24, n.startsWith('mark_lastseen') ? C.phosphor_dim : C.phosphor); i.classList.add('glow'); i.style.cssText += `position:absolute;left:${x}px;top:${y}px;`; scr.append(i);
+    const t = el('div', ''); t.style.cssText = `position:absolute;left:${x + 30}px;top:${y + 5}px;${style('state_body')}color:${C.phosphor};`; t.className = 'glow'; t.textContent = n.startsWith('unit_officer') ? 'PATROL 2' : n === 'mark_lastseen' ? '00:40' : ''; scr.append(t); }
+
+  // 3. ink on paper
+  const r3 = plate('icons_paper', `${set.id}: ministry ink on paper at 16 and 24 px (cards, forms)`, [set.id]);
+  const pap = el('div', 'paper row'); pap.style.cssText = 'padding:14px;gap:14px;'; r3.append(pap);
+  for (const n of Object.keys(set.json.icons).sort()) { const c = el('div', 'sizes'); c.append(await icon(set.id, n, 16, C.ministry_ink)); c.append(await icon(set.id, n, 24, C.ministry_ink)); pap.append(c); }
+}
+
+// 4. the feed frame
+for (const a of job.assets.filter((a) => a.id === 'ui_panel_feed')) {
+  const p = plate('panel_feed', 'ui_panel_feed: main monitor 344x288 (320x240 feed), mux 184x168 (160x120), stress 520x232; feed image is an approximation of the S9 treatment', [a.id]);
+  const r = el('div', 'row'); r.style.gap = '28px'; p.append(r);
+  for (const [w, h, cam, lit] of [[344, 288, 'CAM 04', true], [184, 168, 'CAM 02', false], [520, 232, 'CAM 07 PLAZA', false]]) {
+    const n = nine(a.id, w, h); const s = a.json.slice; r.append(n);
+    const f = el('div', 'feedimg'); f.style.cssText += `left:0;top:0;width:${w - s.l - s.r}px;height:${h - s.t - s.b}px;background-image:url(/ctx/feed.png);`; n.append(f);
+    put(n, a.json, 'label', w, h, cam);
+    const lamp = put(n, a.json, 'lamp', w, h, null); lens(lamp, lit);
+    put(n, a.json, 'emblem', w, h, await icon('ui_iconset_gov', 'emblem', 16, roleFg('bezel.engraved')));
+  }
+}
+
+// 5. incident cards in the tray
+for (const a of job.assets.filter((a) => a.id === 'ui_tpl_incident_card')) {
+  const p = plate('cards', 'ui_tpl_incident_card: four sim incidents at 340 px in the tray (severity 1-3, stamp on one), then one at 2x', [a.id, 'ui_fonts']);
+  const tray = el('div', 'row'); tray.style.cssText = 'flex-direction:column;gap:10px;width:380px;padding:14px;background:' + C.bezel_dark; const r = el('div', 'row'); r.style.gap = '40px'; r.append(tray); p.append(r);
+  const alias = A.ui_iconset_gov?.json.aliases || {};
+  const mk = async (inc, i, scale = 1) => {
+    const stamped = inc.type === 'citizen_detained';
+    const lines = Math.ceil(inc.text.length / 40); const h = Math.max(a.json.size[1], 26 + 8 + lines * 18 + 18) + (stamped ? a.json.stamp_band : 0);
+    const n = nine(a.id, 340, h, ['', 'b', 'c'][i % 3]); const [m0, m1] = T.paper.misalign_deg; n.style.transform = `rotate(${(m0 + (m1 - m0) * ((hash(inc.text) % 100) / 100)).toFixed(2)}deg)`;
+    put(n, a.json, 'icon', 340, h, await icon('ui_iconset_gov', alias['incident:' + inc.type] || 'inc_tip', 16, roleFg('paper.icon')));
+    put(n, a.json, 'source', 340, h, inc.source);
+    put(n, a.json, 'time', 340, h, inc.t, 'text-align:right;');
+    const pr = put(n, a.json, 'priority', 340, h, null);
+    tick(a.json, pr, inc.severity);
+    const body = put(n, a.json, 'body', 340, h, typed(inc.text), 'white-space:normal;');
+    if (inc.type === 'citizen_detained') { const st = put(n, a.json, 'stamp', 340, h, null); const sd = el('div', 'stamp', L('stamp.detained')); sd.style.cssText += `inset:0;transform:rotate(-4deg);${style('state_head')}`; st.append(sd); st.style.overflow = 'visible'; }
+    return n;
+  };
+  const incs = job.copy.mock?.incidents || [];
+  for (const [i, inc] of incs.entries()) tray.append(await mk(inc, i));
+  const raw = el('div'); raw.style.cssText = 'display:grid;gap:8px;'; raw.append(el('div', 'tech', 'raw textures @2x at 1:1 (base, tear b, tear c)')); for (const im of [a.json.images['2'], a.json.variants.b['2'], a.json.variants.c['2']]) { const x = el('img'); x.src = '/export/ui/templates/' + im; raw.append(x); } r.append(raw);
+}
+
+// 6. dossiers
+for (const a of job.assets.filter((a) => a.id === 'ui_tpl_dossier')) {
+  const p = plate('dossier', 'ui_tpl_dossier: a new file (CCTV still) and a processed file (portrait, more observations, stamp); labels are runtime slots', [a.id, 'ui_fonts']);
+  const r = el('div', 'row'); r.style.gap = '40px'; r.style.padding = '10px'; p.append(r);
+  const sub = job.copy.mock.subject;
+  const mk = (variant) => {
+    const obs = variant === 0 ? [`File opened ${sub.opened}. First sighting ${sub.sighting}.`] : [`File opened ${sub.opened}. First sighting ${sub.sighting}.`, 'Subject left the tram queue against the flow.', 'Checkpoint 2: papers in order.', 'Detained near the plaza. Escorted to the depot.', `Identity established: ${sub.name}, ${sub.occupation}.`];
+    const h = a.json.size[1] + Math.max(0, obs.length * 2 - 4) * 16;
+    const n = nine(a.id, 360, h); n.style.transform = `rotate(${variant ? 0.4 : -0.3}deg)`;
+    put(n, a.json, 'ministry_gloss', 360, h, L('ministry.gloss'));
+    put(n, a.json, 'form_no', 360, h, typed(L('dossier.form')), 'text-align:center;');
+    const ph = put(n, a.json, 'photo', 360, h, null); const im = el('div', 'photo'); im.style.cssText += `inset:0;background-image:url(${variant ? '/ctx/portrait/' + Math.max(0, job.portraits.findIndex((p) => /_m_a/.test(p))) + '.png' : '/ctx/feed.png'});`; ph.append(im);
+    put(n, a.json, 'name', 360, h, typed(variant ? sub.name.toUpperCase() : 'SUBJECT 3'));
+    const vals = variant ? [L('dossier.status.watch'), sub.sighting, `${sub.occupation}, ${sub.age}`] : [L('dossier.status.watch'), sub.sighting, L('dossier.identity.none')];
+    ['dossier.status', 'dossier.sighting', 'dossier.identity'].forEach((k, i) => { put(n, a.json, 'label_' + (i + 1), 360, h, L(k)); put(n, a.json, 'value_' + (i + 1), 360, h, typed(vals[i])); });
+    put(n, a.json, 'obs_label', 360, h, L('dossier.notes'));
+    const ob = put(n, a.json, 'observations', 360, h, null, 'white-space:normal;');
+    const sl = a.json.slots.find((s) => s.id === 'observations');
+    const [, , obw] = slotRect(a.json, sl, 360, h); const meas = document.createElement('canvas').getContext('2d'); meas.font = `${S.type_body.size}px "Courier Prime"`;
+    const lines = []; for (const t of obs) { let cur = ''; for (const wd of t.split(' ')) { const nx = cur ? cur + ' ' + wd : wd; if (meas.measureText(nx).width > obw - 4 && cur) { lines.push(cur); cur = wd; } else cur = nx; } lines.push(cur); }
+    lines.forEach((t, i) => { const d = el('div'); d.style.cssText = `position:absolute;left:0;top:${sl.first_baseline + i * sl.line_px - 14}px;height:18px;line-height:18px;white-space:nowrap;`; d.append(typed(t)); ob.append(d); });
+    put(n, a.json, 'signed', 360, h, L('dossier.signed'));
+    if (variant) { const st = put(n, a.json, 'stamp', 360, h, null); const sd = el('div', 'stamp', L('stamp.detained')); sd.style.cssText += `inset:0;transform:rotate(-6deg);${style('state_head')}`; st.append(sd); st.style.overflow = 'visible'; }
+    return n;
+  };
+  r.append(mk(0)); r.append(mk(1));
+}
+
+// 7. type and colour specimen
+if (A.ui_tokens) {
+  const p = plate('tokens', 'ui_tokens: type scale on screen and paper, colour roles with measured contrast', ['ui_tokens', 'ui_fonts']);
+  const r = el('div', 'row'); p.append(r);
+  const scr = el('div', 'screen'); scr.style.cssText = 'padding:14px;width:760px;'; const pap = el('div', 'paper'); pap.style.cssText = 'padding:14px;width:760px;';
+  for (const k of Object.keys(S)) {
+    const host = S[k].family === 'state' ? scr : pap;
+    const d = el('div'); d.style.cssText = style(k) + `color:${S[k].family === 'state' ? C.phosphor : C.ministry_ink};margin-bottom:8px;`;
+    d.textContent = `${k} ${S[k].size}px · KOOPERÁNCE CIVICÁ ÁST ORDÓ · 0123456789 22:41`; host.append(d);
+  }
+  r.append(scr); r.append(pap);
+  const sw = el('div', 'row'); sw.style.marginTop = '14px'; p.append(sw);
+  for (const [k, ro] of Object.entries(T.roles)) { const s = el('div', 'swatch'); s.style.background = ro.bg_hex; s.style.color = ro.fg_hex; s.style.cssText += style('state_label'); s.textContent = `${k} ${ro.contrast}:1 ${ro.use}`; sw.append(s); }
+}
+
+// 7b. project plate modules (src/ui/_review/*.mjs): plates for assets this harness has no built-in plate for
+const H = { job, T, C, S, A, el, plate, L, style, roleFg, typed, icon, nine, slotRect, put, lens, tick, hash, rnd, fits };
+for (const [i] of (job.plate_modules || []).entries()) { const mod = await import(`/plates/${i}.mjs`); await mod.default(H); }
+
+// 8. the control-room mock
+{
+  const p = plate('mock_console', 'control room mock, 1600x860: everything placed from tokens, icons, panels and templates (words: copy.md + client labels + sim data)', job.assets.map((a) => a.id));
+  p.style.height = '900px'; p.style.padding = '0';
+  const m = el('div'); m.style.cssText = `position:absolute;inset:0;background:${C.desk};`; p.append(m);
+  const hdr = el('div'); hdr.style.cssText = `position:absolute;left:0;top:0;right:0;height:72px;border-bottom:1px solid ${C.bezel_light};display:flex;align-items:center;gap:32px;padding:0 20px;`; m.append(hdr);
+  const lab = (t) => { const d = el('div'); d.style.cssText = style('state_label') + `color:${C.engrave};`; d.textContent = t; return d; };
+  const blk = (a, b) => { const d = el('div'); d.style.cssText = 'display:grid;gap:6px;'; d.append(lab(a)); d.append(b); return d; };
+  const em = await icon('ui_iconset_gov', 'emblem', 32, C.engrave); const id = el('div'); id.style.cssText = 'display:flex;gap:10px;align-items:center;'; id.append(em); id.append(blk(L('ministry.print'), lab(L('ministry.gloss')))); hdr.append(id);
+  const clock = el('div', 'screen crt'); clock.style.cssText = `padding:2px 8px;${style('state_display')}color:${C.phosphor};`; clock.innerHTML = '<span class="glow">07:42</span>'; hdr.append(blk('Operation', clock));
+  const lamps = el('div', 'row'); lamps.style.gap = '12px'; for (const [k, on] of [['alert.calm', false], ['alert.suspected', true], ['alert.declared', false]]) { const d = el('div'); d.style.cssText = style('state_label') + `display:flex;gap:6px;align-items:center;color:${on ? C.phosphor : C.engrave};`; const b = el('i'); b.style.cssText = `width:10px;height:10px;border-radius:50%;background:${on ? C.phosphor : C.bezel_dark};border:1px solid ${C.bezel_light};display:inline-block;`; d.append(b); d.append(document.createTextNode(L(k))); lamps.append(d); } hdr.append(blk(L('desk.situation'), lamps));
+  const gauge = el('div', 'screen crt'); gauge.style.cssText = `width:180px;height:22px;padding:4px;`; const gb = el('div', 'glow'); gb.style.cssText = `height:100%;width:46%;background:repeating-linear-gradient(90deg, ${C.phosphor} 0 6px, transparent 6px 8px);`; gauge.append(gb); hdr.append(blk(L('desk.civil_order'), gauge));
+  const cands = el('div', 'row'); cands.style.gap = '16px'; for (const [n, t] of [['obj_radio', 'Radio tower'], ['obj_prison', 'Police station'], ['obj_charge', 'Monument plinth']]) { const d = el('div', 'screen crt'); d.style.cssText = `display:flex;gap:6px;align-items:center;padding:2px 6px;${style('state_body')}color:${C.phosphor};`; const i = await icon('ui_iconset_gov', n, 16, C.phosphor); d.append(i); d.append(document.createTextNode(t)); cands.append(d); } hdr.append(blk(L('desk.objectives'), cands));
+  // city
+  const city = el('div', 'screen crt'); city.style.cssText = `position:absolute;left:0;top:73px;width:1170px;bottom:0;`; m.append(city);
+  const g2 = el('div'); g2.style.cssText = `position:absolute;inset:0;background-image:linear-gradient(${C.phosphor_faint} 1px, transparent 1px),linear-gradient(90deg, ${C.phosphor_faint} 1px, transparent 1px);background-size:64px 64px;opacity:.3;`; city.append(g2);
+  const blocks = [[120, 90, 260, 160], [440, 90, 300, 160], [800, 90, 260, 220], [120, 330, 200, 240], [380, 330, 360, 120], [800, 390, 260, 180], [380, 520, 360, 120]];
+  for (const [x, y, w, h] of blocks) { const b = el('div'); b.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;border:1px solid ${C.phosphor_dim};`; city.append(b); }
+  const mk2 = [['unit_officer', 400, 280, 'PATROL 1'], ['unit_officer', 760, 470, 'PATROL 2'], ['unit_camera', 330, 66, 'CAM 01'], ['unit_camera', 760, 290, 'CAM 04'], ['unit_camera_dead', 1080, 330, 'CAM 07'], ['mark_subject', 560, 480, '3'], ['mark_lastseen', 230, 600, '00:40'], ['tool_checkpoint', 760, 640, 'CHECKPOINT 2'], ['obj_radio', 900, 160, ''], ['obj_prison', 200, 420, ''], ['obj_charge', 540, 370, '']];
+  for (const [n, x, y, t] of mk2) { const i = await icon('ui_iconset_gov', n, 24, n === 'mark_lastseen' ? C.phosphor_dim : C.phosphor); i.classList.add('glow'); i.style.cssText += `position:absolute;left:${x}px;top:${y}px;`; city.append(i); if (t) { const d = el('div', 'glow'); d.style.cssText = `position:absolute;left:${x + 28}px;top:${y + 4}px;${style('state_body')}color:${n === 'mark_lastseen' ? C.phosphor_dim : C.phosphor};`; d.textContent = t; city.append(d); } }
+  // keys
+  const keys = el('div', 'row'); keys.style.cssText = `position:absolute;left:16px;bottom:86px;gap:6px;padding:6px;background:${C.desk};border:1px solid ${C.bezel_light};`;
+  for (const [n, hot, t] of [['tool_patrol', 'P', 'Patrol'], ['tool_sweep', 'S', 'Sweep'], ['tool_checkpoint', 'C', 'Checkpoint'], ['tool_lockdown', 'L', 'Lockdown'], ['tool_riot', 'R', 'Riot squad'], ['tool_curfew', 'U', 'Curfew'], ['tool_broadcast', 'B', 'Broadcast']]) { const k = el('div', 'key' + (n === 'tool_patrol' ? ' on' : '')); k.append(el('b', '', hot)); { const ki = await icon('ui_iconset_gov', n, 24); ki.style.cssText += 'position:absolute;right:8px;top:8px;'; k.append(ki); } k.append(el('span', '', t)); keys.append(k); }
+  m.append(keys);
+  const board = el('div', 'screen crt'); board.style.cssText = `position:absolute;left:16px;right:446px;bottom:12px;height:62px;padding:6px 10px;border:1px solid ${C.bezel_light};`; board.append(lab(L('desk.dispatch')));
+  const slips = el('div', 'row glow'); slips.style.cssText = `gap:20px;margin-top:6px;${style('state_body')}color:${C.phosphor};`; slips.innerHTML = '<span>PATROL 1 · PATROL</span><span style="opacity:.35">PATROL 2 · CHECKPOINT</span><span class="inverse" style="padding:0 4px">RIOT 1 · PENDING</span>'; board.append(slips); m.append(board);
+  // side
+  const side = el('div'); side.style.cssText = `position:absolute;left:1180px;top:82px;right:12px;bottom:0;display:grid;gap:10px;align-content:start;`; m.append(side);
+  const feedA = A.ui_panel_feed;
+  if (feedA) { const s = feedA.json.slice; const n = nine('ui_panel_feed', 344, 288); n.style.marginLeft = '30px'; const f = el('div', 'feedimg'); f.style.cssText += `left:0;top:0;width:320px;height:240px;background-image:url(/ctx/feed.png);`; n.append(f); put(n, feedA.json, 'label', 344, 288, 'CAM 04'); const lp = put(n, feedA.json, 'lamp', 344, 288, null); lens(lp, true); put(n, feedA.json, 'emblem', 344, 288, await icon('ui_iconset_gov', 'emblem', 16, roleFg('bezel.engraved'))); side.append(n); }
+  const cardA = A.ui_tpl_incident_card;
+  if (cardA) { const tray = el('div'); tray.style.cssText = `display:grid;gap:8px;padding:8px 20px;background:${C.bezel_dark};`; side.style.gap = '6px'; const alias = A.ui_iconset_gov.json.aliases;
+    for (const [ii, inc] of (job.copy.mock.incidents || []).slice(1, 2).entries()) { const h = 104; const n = nine('ui_tpl_incident_card', 340, h, ['b', 'c'][ii]); tick(cardA.json, put(n, cardA.json, 'priority', 340, h, null), inc.severity); put(n, cardA.json, 'icon', 340, h, await icon('ui_iconset_gov', alias['incident:' + inc.type], 16, C.ministry_ink)); put(n, cardA.json, 'source', 340, h, inc.source); put(n, cardA.json, 'time', 340, h, inc.t, 'text-align:right;'); put(n, cardA.json, 'body', 340, h, typed(inc.text), 'white-space:normal;'); tray.append(n); }
+    side.append(tray); }
+  const dA = A.ui_tpl_dossier;
+  if (dA) { const wrap = el('div'); wrap.style.cssText = 'padding-left:20px;'; const h = 268; const n = nine('ui_tpl_dossier', 360, h); n.style.transform = 'rotate(-0.3deg)'; put(n, dA.json, 'form_no', 360, h, typed(L('dossier.form')), 'text-align:center;'); const ph = put(n, dA.json, 'photo', 360, h, null); const im = el('div', 'photo'); im.style.cssText += 'inset:0;background-image:url(/ctx/feed.png);'; ph.append(im); put(n, dA.json, 'name', 360, h, typed('SUBJECT 3')); ['dossier.status', 'dossier.sighting', 'dossier.identity'].forEach((k, i) => { put(n, dA.json, 'label_' + (i + 1), 360, h, L(k)); put(n, dA.json, 'value_' + (i + 1), 360, h, typed([L('dossier.status.watch'), 'CAM 04 · 05:40', L('dossier.identity.none')][i])); }); put(n, dA.json, 'obs_label', 360, h, L('dossier.notes')); wrap.append(n); side.append(wrap); }
+}
+
+await document.fonts.ready;
+await new Promise((r) => setTimeout(r, 300));
+window.measure = () => ({ plates, fits, fonts: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family} ${f.weight} ${f.style}`) });
+window.ready = true;
+</script>
+</body></html>

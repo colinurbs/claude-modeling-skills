@@ -45,6 +45,31 @@ add a long thin strip light that the flat faces can mirror.
   don't copy a real one from a reference photo.
 - **White sight inserts:** separate tiny meshes with a white rough material, not texture.
 
+## Node-wiring gotcha: Mix node sockets (Blender 4+)
+
+`ShaderNodeMix` has float, vector and color variants of every socket, all with the **same
+names**. `node.inputs["A"]` and `node.outputs["Result"]` return the *float* one, even when
+`data_type = 'RGBA'`. Links to those land on hidden sockets and fail silently: the material
+renders, but the color mix does nothing. Always pick the enabled socket:
+
+```python
+def sock(sockets, name):
+    return next(s for s in sockets if s.name == name and s.enabled)
+mix = nt.nodes.new("ShaderNodeMix"); mix.data_type = 'RGBA'
+nt.links.new(base, sock(mix.inputs, "A")); sock(mix.inputs, "B").default_value = (0.2, 0.2, 0.2, 1)
+nt.links.new(fac, sock(mix.inputs, "Factor")); out = sock(mix.outputs, "Result")
+```
+
+## Projected decals (markings, numbers, roundels)
+
+No UVs needed. Create an empty whose local XY plane is the decal (scale = decal size).
+Wire `Texture Coordinate → Object (that empty) → Mapping (location 0.5, 0.5) → Image
+Texture (extension CLIP)`. Mix the image color over the base with its alpha, multiplied by a
+**facing mask**: the world normal component along the projection axis `> 0.3` (with the
+sign per side), so the decal doesn't print through onto the far side. For text or
+asymmetric markings, use a second empty with scale.x negated for the other side, or it reads
+mirrored. Painted areas should also lower Metallic and raise Roughness via the same mask.
+
 ## Render setup
 
 - Cycles, GPU (`compute_device_type = 'METAL' | 'CUDA' | 'OPTIX'`, then `get_devices()`),

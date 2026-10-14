@@ -1,0 +1,9 @@
+{
+  "skill_name": "game-vfx",
+  "_note": "Test prompts for skill-creator's eval loop. Not run in the pilot (16 GB machine shared with other agents); the pilot itself (8 effects) exercised every stage.",
+  "evals": [
+    {"id": 1, "prompt": "In irongrip, make vfx_impact_glass: a round through a shop window. Use the existing sheets where you can and pair it with dec_bullet_hole_glass_a.", "expected_output": "src/vfx/vfx_impact_glass/vfx.json + export JSON, validate PASS, review sheet, critic run, manifest entry", "files": []},
+    {"id": 2, "prompt": "the tear gas canister needs its smoke. it's a gameplay volume (radius from the sim). make the looping effect and tell me what the engine has to feed it", "expected_output": "class smoke loop, rate-only emitters scaled by volume parameters, engine asks for radius/density inputs, review day/night/CCTV", "files": []},
+    {"id": 3, "prompt": "Our pistol muzzle flash looks like a fireball in the night review, fix it", "expected_output": "reads review.json clipped share and the night strip, lowers flash keys/size/light per look.md, re-reviews, reports measured before/after", "files": []}
+  ]
+}

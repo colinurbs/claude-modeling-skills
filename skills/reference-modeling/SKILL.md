@@ -1,6 +1,6 @@
 ---
 name: reference-modeling
-description: Model a real-world object in Blender from reference images with accurate proportions, correct 3D form, AND real polygon topology — not stacked primitives or a flat uniform extrusion. Use whenever the user wants to model a recognizable real object (vehicle, tool, gadget, weapon, furniture, vessel, prop, building, character part) in Blender, says "model X from a reference/blueprint", asks for hard-surface or poly modeling, wants reference/blueprint images set up, or is unhappy that a from-scratch model looks blocky, boxy, flat, or "not realistic". It picks a construction strategy (revolve / mirror / array / freeform) from the references and gates every phase on measured proportion, silhouette IoU, and form taper rather than on visual judgment. Wants a filled silhouette mask per available reference view for the IoU checks.
+description: Model a real-world object in Blender from reference images with accurate proportions, correct 3D form, AND real polygon topology — not stacked primitives or a flat uniform extrusion. Use whenever the user wants to model a recognizable real object (vehicle, tool, gadget, weapon, furniture, vessel, prop, building, character part) in Blender, says "model X from a reference/blueprint", asks for hard-surface or poly modeling, wants reference/blueprint images set up, or is unhappy that a from-scratch model looks blocky, boxy, flat, or "not realistic". It picks a construction strategy (revolve / mirror / array / freeform) from the references and gates every phase on measured proportion, silhouette IoU, and form taper rather than on visual judgment. Wants a filled silhouette mask per available reference view for the IoU checks. If the model is a GAME asset (anything exported to glTF/an engine, with budgets, LODs, collision or a delivery spec), use game-asset-modeling as the driver; it calls this skill only for the form stage of recognizable real objects.
 ---
 
 # reference-modeling
@@ -48,6 +48,12 @@ Always `print(...)` anything you need back — the MCP returns stdout.
 
 If the user explicitly wants a quick stylized/blocky prop and doesn't care about
 accuracy, this is overkill — model directly.
+
+**Game assets:** when the model is going into a game engine, the `game-asset-modeling`
+skill owns the job (brief, budget, UVs, baked materials, LODs, collision, export, spec
+validation, engine review). Use Phases 0–3 here for the form of a recognizable real object,
+then hand back. Skip Phase 5's Cycles-only materials and beauty renders for game work —
+they don't survive glTF export.
 
 ## Prerequisites
 

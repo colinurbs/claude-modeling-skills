@@ -1,0 +1,280 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>anim review harness</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script src="/gam/node_modules/babylonjs/babylon.js"></script>
+<script src="/gam/node_modules/babylonjs-loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Review harness for game-animation. Driven by shoot_anim.mjs. Right-handed scene, so node
+// values == glTF values (+Y up, character faces +Z, its left is +X).
+// Clips are converted onto the body's bone frames with the same math as the engine's
+// packages/engine/src/anim/retarget.ts (convertRotation / convertPosition), so what renders
+// here is what the engine will pose.
+const B = BABYLON;
+let engine, scene, cfg, cam, sun, shadowGen, ground;
+const S = { nodes: {}, rest: {}, A: {}, Ainv: {}, meshes: [], clips: {}, cur: null, markers: [], errors: [] };
+const hex = (h, a = 1) => { h = h.replace('#', ''); return new B.Color4(...[0, 2, 4].map(i => parseInt(h.substr(i, 2), 16) / 255), a); };
+const hex3 = h => { const c = hex(h); return new B.Color3(c.r, c.g, c.b); };
+const listExtra = v => { if (!v) return []; if (Array.isArray(v)) return v.map(String); const s = String(v).trim(); if (!s.startsWith('[')) return s ? [s] : []; try { return JSON.parse(s.replace(/'/g, '"')).map(String); } catch { return []; } };
+
+window.boot = async (c) => {
+  cfg = c;
+  const canvas = document.getElementById('c');
+  canvas.width = c.w; canvas.height = c.h; canvas.style.width = c.w + 'px'; canvas.style.height = c.h + 'px';
+  engine = new B.Engine(canvas, true, { preserveDrawingBuffer: true, antialias: true, stencil: true, premultipliedAlpha: false, alpha: true });
+  scene = new B.Scene(engine);
+  scene.useRightHandedSystem = true;
+  const R = c.review;
+  scene.clearColor = hex(R.background);
+  const ip = scene.imageProcessingConfiguration;
+  ip.toneMappingEnabled = true; ip.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES; ip.exposure = R.exposure ?? 1.0;
+  const env = new B.HDRCubeTexture(c.hdri, scene, 128, false, true, false, true);
+  await new Promise(res => { if (env.isReady()) res(); else env.onLoadObservable.addOnce(res); setTimeout(res, 8000); });
+  scene.environmentTexture = env; scene.environmentIntensity = 1.0;
+  sun = new B.DirectionalLight('sun', new B.Vector3(-0.35, -1, -0.45), scene); sun.intensity = 0.9; sun.position = new B.Vector3(20, 40, 25);
+  shadowGen = new B.ShadowGenerator(1024, sun); shadowGen.usePercentageCloserFiltering = true; shadowGen.bias = 0.002; shadowGen.normalBias = 0.01; shadowGen.darkness = 0.45;
+  ground = B.MeshBuilder.CreateGround('__ground', { width: 200, height: 200 }, scene);
+  const gm = new B.PBRMaterial('__groundMat', scene); gm.albedoColor = hex3(R.ground); gm.metallic = 0; gm.roughness = 1;
+  ground.material = gm; ground.receiveShadows = true; ground.position.y = -0.001;
+  // grid lines every metre so travel and slide read
+  const lines = [];
+  for (let i = -20; i <= 20; i++) { lines.push([new B.Vector3(i, 0.001, -20), new B.Vector3(i, 0.001, 20)]); lines.push([new B.Vector3(-20, 0.001, i), new B.Vector3(20, 0.001, i)]); }
+  const grid = B.MeshBuilder.CreateLineSystem('__grid', { lines }, scene); grid.color = new B.Color3(0.42, 0.43, 0.41);
+
+  // body + head + outfits
+  const bodyRes = await B.SceneLoader.ImportMeshAsync('', '/part/', '0.glb', scene);
+  const skel = bodyRes.skeletons[0];
+  if (!skel) throw new Error('body has no skeleton');
+  const byName = {}; for (const n of scene.transformNodes) if (!byName[n.name]) byName[n.name] = n;
+  for (const b of c.bones) if (byName[b]) S.nodes[b] = byName[b];
+  const bodyMeshes = bodyRes.meshes.filter(m => m.getTotalVertices && m.getTotalVertices() > 0);
+  const lod = m => { const k = /_lod(\d)/.exec(m.name); return k ? +k[1] : 0; };
+  for (const m of bodyMeshes) { if (lod(m) > 0) m.setEnabled(false); else S.meshes.push(m); }
+  const extrasOf = n => (n.metadata && n.metadata.gltf && n.metadata.gltf.extras) || {};
+  let bodyExtras = {}; for (const n of [...scene.transformNodes, ...scene.meshes]) { const e = extrasOf(n); if (e.ig_kind === 'body') bodyExtras = e; }
+  const zones = listExtra(bodyExtras.ig_zones); const hide = new Set();
+  for (let pi = 1; pi < c.parts.length; pi++) {
+    const r = await B.SceneLoader.ImportMeshAsync('', '/part/', pi + '.glb', scene);
+    let ex = {}; for (const n of [...r.transformNodes, ...r.meshes]) { const e = extrasOf(n); if (e.ig_kind) ex = e; }
+    for (const z of listExtra(ex.ig_hide_zones)) { const i = zones.indexOf(z); if (i >= 0) hide.add(i); }
+    const theirs = r.skeletons[0];
+    for (const m of r.meshes) {
+      if (!m.getTotalVertices || m.getTotalVertices() === 0) continue;
+      if (lod(m) > 0) { m.setEnabled(false); continue; }
+      if (theirs && m.skeleton === theirs) {
+        const same = theirs.bones.length === skel.bones.length && theirs.bones.every((b, i) => b.name === skel.bones[i].name);
+        if (!same) {
+          const map = theirs.bones.map(b => Math.max(0, skel.bones.findIndex(x => x.name === b.name)));
+          m.makeGeometryUnique();
+          for (const kind of [B.VertexBuffer.MatricesIndicesKind, B.VertexBuffer.MatricesIndicesExtraKind]) {
+            const d = m.getVerticesData(kind); if (!d) continue; const o = new Float32Array(d.length);
+            for (let i = 0; i < d.length; i++) o[i] = map[d[i]] ?? 0; m.setVerticesData(kind, o, false, 4);
+          }
+        }
+        m.skeleton = skel;
+      }
+      S.meshes.push(m);
+    }
+  }
+  // body culling under clothes (engine Rig.refreshMask)
+  if (hide.size) for (const m of S.meshes.filter(x => bodyMeshes.includes(x))) {
+    const uv2 = m.getVerticesData(B.VertexBuffer.UV2Kind); const idx = m.getIndices(); if (!uv2 || !idx) continue;
+    const z = i => Math.floor(uv2[i * 2]); const kept = [];
+    for (let i = 0; i < idx.length; i += 3) { const a = idx[i], b = idx[i + 1], d = idx[i + 2]; if (hide.has(z(a)) && hide.has(z(b)) && hide.has(z(d))) continue; kept.push(a, b, d); }
+    m.setIndices(kept);
+  }
+  for (const m of S.meshes) { m.receiveShadows = true; shadowGen.addShadowCaster(m); m.alwaysSelectAsActiveMesh = true; }
+  // rest frames (engine frameMapOf): accumulate down the spec hierarchy from root
+  for (const b of c.bones) {
+    const n = S.nodes[b]; if (!n) continue;
+    if (!n.rotationQuaternion) n.rotationQuaternion = B.Quaternion.FromEulerVector(n.rotation);
+    S.rest[b] = { p: n.position.clone(), q: n.rotationQuaternion.clone() };
+    const p = c.parents[b]; const pw = (p && S.A[p]) || B.Quaternion.Identity();
+    const w = pw.multiply(S.rest[b].q); w.normalize(); S.A[b] = w; S.Ainv[b] = B.Quaternion.Inverse(w);
+  }
+  // animation set
+  const ar = await B.SceneLoader.ImportMeshAsync('', '/anim/', 'set.glb', scene);
+  for (const g of scene.animationGroups) {
+    g.stop();
+    const tracks = {};
+    for (const ta of g.targetedAnimations) {
+      const nm = ta.target.name; const t = tracks[nm] = tracks[nm] || {};
+      if (ta.animation.targetProperty === 'rotationQuaternion') t.rot = ta.animation; else if (ta.animation.targetProperty === 'position') t.pos = ta.animation;
+    }
+    S.clips[g.name] = { tracks, from: g.from, to: g.to, fps: (g.targetedAnimations[0] && g.targetedAnimations[0].animation.framePerSecond) || 60 };
+  }
+  for (const m of ar.meshes) if (m.name !== '__root__') m.setEnabled(false);
+  for (const n of ar.transformNodes) n.setEnabled(false);
+  await scene.whenReadyAsync();
+  return { clips: Object.keys(S.clips), bones: Object.keys(S.nodes).length, meshes: S.meshes.map(m => m.name), zones_hidden: hide.size, extras: bodyExtras.ig_body || null };
+};
+
+const SRC_HIPS = () => B.Vector3.FromArray(cfg.hips_rest_src);
+function evalAt(anim, frame) { return anim.evaluate(frame); }
+// engine retarget.ts: q_t = A_parent^-1 * q_s * A_bone ; hips: A_parent^-1 * (p - srcRest) * scale + dstRest
+function _poseFrame(name, k, rootMotion = true) {
+  const C = S.clips[name]; const f = C.from + k * (C.fps / cfg.fps);
+  for (const b of cfg.bones) {
+    const n = S.nodes[b]; if (!n) continue; const t = C.tracks[b];
+    const p = cfg.parents[b]; const ap = (p && S.Ainv[p]) || B.Quaternion.Identity(); const ab = S.A[b];
+    if (t && t.rot) { const q = ap.multiply(evalAt(t.rot, Math.min(f, C.to))).multiply(ab); q.normalize(); n.rotationQuaternion.copyFrom(q); }
+    else n.rotationQuaternion.copyFrom(S.rest[b].q);
+    if (t && t.pos) {
+      const key = evalAt(t.pos, Math.min(f, C.to));
+      if (b === 'hips') {
+        const src = SRC_HIPS(), dst = S.rest[b].p; const sc = dst.length() / src.length();
+        const local = key.subtract(src).scale(sc); const out = new B.Vector3(); local.rotateByQuaternionToRef(ap, out); n.position.copyFrom(out.add(dst));
+      } else if (b === 'root') { n.position.copyFrom(rootMotion ? key : new B.Vector3(0, 0, 0)); }
+      else n.position.copyFrom(key);
+    } else n.position.copyFrom(S.rest[b].p);
+  }
+  for (const b of cfg.bones) if (S.nodes[b]) S.nodes[b].computeWorldMatrix(true);
+}
+window.poseFrame = (n, k, rm) => { _poseFrame(n, k, rm); return true; };
+window.frames = name => { const C = S.clips[name]; return Math.round((C.to - C.from) / (C.fps / cfg.fps)) + 1; };
+
+function jointBounds() {
+  let min = new B.Vector3(1e9, 1e9, 1e9), max = new B.Vector3(-1e9, -1e9, -1e9);
+  for (const b of cfg.bones) { const n = S.nodes[b]; if (!n || b.startsWith('attach_')) continue; const p = n.getAbsolutePosition(); min = B.Vector3.Minimize(min, p); max = B.Vector3.Maximize(max, p); }
+  min.y = Math.min(min.y, 0); max.y += 0.18; min.x -= 0.2; max.x += 0.2; min.z -= 0.2; max.z += 0.2;
+  return { min, max, center: min.add(max).scale(0.5), size: max.subtract(min) };
+}
+window.jointPos = names => Object.fromEntries(names.map(b => [b, S.nodes[b] ? S.nodes[b].getAbsolutePosition().asArray() : null]));
+
+function makeCam(pos, target, fov = 0.6, ortho = null) {
+  if (cam) cam.dispose();
+  cam = new B.UniversalCamera('cam', pos, scene); cam.setTarget(target); cam.minZ = 0.05; cam.maxZ = 500; cam.fov = fov;
+  if (ortho) { cam.mode = B.Camera.ORTHOGRAPHIC_CAMERA; const a = engine.getRenderWidth() / engine.getRenderHeight(); let hw = ortho.w, hh = ortho.h; if (hw / hh > a) hh = hw / a; else hw = hh * a; cam.orthoLeft = -hw; cam.orthoRight = hw; cam.orthoTop = hh; cam.orthoBottom = -hh; }
+  scene.activeCamera = cam; return cam;
+}
+async function render() { scene.render(); scene.render(); return engine.getRenderingCanvas().toDataURL('image/png'); }
+const dir = (az, el) => new B.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+const rad = d => d * Math.PI / 180;
+
+// in-place three-quarter frame (character framed, root motion removed)
+window.shootFrame = async (name, k, view = 'three_quarter') => {
+  _poseFrame(name, k, false);
+  setMarkers(false); ground.setEnabled(true); scene.clearColor = hex(cfg.review.background);
+  const c = new B.Vector3(0, 0.9, 0); const az = view === 'front' ? 0 : view === 'side' ? -90 : -35;
+  makeCam(c.add(dir(rad(az), rad(12)).scale(4.6)), c, 0.55);
+  return await render();
+};
+
+// markers: foot contacts (disc per contact frame, colour per foot, red when the step slid) + root path
+function clearMarkers() { for (const m of S.markers) m.dispose(); S.markers = []; }
+function setMarkers(on) { for (const m of S.markers) m.setEnabled(on); }
+function mat(col, alpha = 1) { const m = new B.StandardMaterial('mk', scene); m.emissiveColor = hex3(col); m.disableLighting = true; m.alpha = alpha; return m; }
+window.buildMarkers = (name, diag) => {
+  clearMarkers();
+  const n = window.frames(name);
+  const path = [];
+  const colL = mat('#E0A030', 0.85), colR = mat('#38A0E0', 0.85), bad = mat('#E03030', 0.95);
+  for (let k = 0; k < n; k++) {
+    _poseFrame(name, k, true);
+    const r = S.nodes.root.getAbsolutePosition(); path.push(new B.Vector3(r.x, 0.012, r.z));
+    for (const s of ['l', 'r']) {
+      if (!diag.contact[s][k]) continue;
+      const toe = S.nodes['toes_' + s].getAbsolutePosition(), ank = S.nodes['foot_' + s].getAbsolutePosition();
+      const slid = diag.slide_bad[s][k];
+      for (const [p, sz] of [[toe, 0.05], [ank, 0.07]]) {
+        const d = B.MeshBuilder.CreateDisc('mk', { radius: sz / 2, tessellation: 12 }, scene);
+        d.rotation.x = Math.PI / 2; d.position = new B.Vector3(p.x, 0.006 + (s === 'l' ? 0.001 : 0.002), p.z);
+        d.material = slid ? bad : (s === 'l' ? colL : colR); S.markers.push(d);
+      }
+    }
+    if (k % 5 === 0) { // facing tick
+      const q = S.nodes.root.rotationQuaternion; const f = new B.Vector3(0, 0, 0.25); const o = new B.Vector3(); f.rotateByQuaternionToRef(q, o);
+      const t = B.MeshBuilder.CreateLines('mk', { points: [path[k], path[k].add(o)] }, scene); t.color = new B.Color3(0.95, 0.95, 0.9); S.markers.push(t);
+    }
+  }
+  const pl = B.MeshBuilder.CreateLines('mk', { points: path }, scene); pl.color = new B.Color3(1, 1, 1); S.markers.push(pl);
+  const ext = path.reduce((a, p) => ({ min: B.Vector3.Minimize(a.min, p), max: B.Vector3.Maximize(a.max, p) }), { min: path[0].clone(), max: path[0].clone() });
+  S.pathExt = ext;
+  return { path: path.map(p => [p.x, p.z]), markers: S.markers.length };
+};
+
+// onion skin: background (ground + markers) then the character alone at several frames, alpha-composited
+async function onion(name, ks, camFn, alphaMin = 0.35) {
+  // layers: ground + grid | character at each frame (transparent) | contact markers + root path on top
+  const grid = scene.getMeshByName('__grid');
+  _poseFrame(name, ks[0], true); setMarkers(false);
+  for (const m of S.meshes) m.setEnabled(false);
+  camFn(); const bg = await render();
+  ground.setEnabled(false); grid.setEnabled(false);
+  const cc = scene.clearColor.clone(); scene.clearColor = new B.Color4(0, 0, 0, 0);
+  setMarkers(true); camFn(); const mk = await render(); setMarkers(false);
+  for (const m of S.meshes) m.setEnabled(true);
+  const layers = [];
+  for (const k of ks) { _poseFrame(name, k, true); camFn(); layers.push(await render()); }
+  scene.clearColor = cc; ground.setEnabled(true); grid.setEnabled(true);
+  const imgs = await Promise.all([bg, ...layers, mk].map(u => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = u; })));
+  const cv = document.createElement('canvas'); cv.width = imgs[0].width; cv.height = imgs[0].height; const x = cv.getContext('2d');
+  x.drawImage(imgs[0], 0, 0);
+  const L = imgs.slice(1, -1);
+  L.forEach((im, i) => { x.globalAlpha = i === L.length - 1 ? 1 : alphaMin + (1 - alphaMin) * i / Math.max(1, L.length - 1); x.drawImage(im, 0, 0); });
+  x.globalAlpha = 0.9; x.drawImage(imgs[imgs.length - 1], 0, 0); x.globalAlpha = 1;
+  return cv.toDataURL('image/png');
+}
+window.shootSide = async (name, ks) => {
+  const e = S.pathExt; const c = e.min.add(e.max).scale(0.5); const span = Math.max(e.max.z - e.min.z, e.max.x - e.min.x) + 1.6;
+  return onion(name, ks, () => makeCam(new B.Vector3(c.x - 40, 0.95, c.z), new B.Vector3(c.x, 0.95, c.z), 0.6, { w: span / 2, h: 1.15 }));
+};
+window.shootTop = async (name, ks) => {
+  const e = S.pathExt; const c = e.min.add(e.max).scale(0.5); const w = Math.max(e.max.x - e.min.x, 1.2) + 1.2, h = Math.max(e.max.z - e.min.z, 1.2) + 1.2;
+  return onion(name, ks, () => makeCam(new B.Vector3(c.x, 40, c.z + 0.001), new B.Vector3(c.x, 0, c.z), 0.6, { w: w / 2, h: h / 2 }), 0.3);
+};
+// Governor's CCTV: mast height, high angle, fixed camera the character walks through, low-res feed
+window.shootCCTV = async (name, k) => {
+  _poseFrame(name, k, true); setMarkers(false);
+  const F = cfg.review.feed; const e = S.pathExt; const c = e.min.add(e.max).scale(0.5); c.y = 0.9;
+  const d = dir(rad(-40), 0); const pos = new B.Vector3(c.x + d.x * (F.distance || 9), F.mount_height || 3.5, c.z + d.z * (F.distance || 9));
+  const W = engine.getRenderWidth(), H = engine.getRenderHeight();
+  engine.setSize(F.res[0], F.res[1]); makeCam(pos, c, 0.75);
+  const small = await render(); engine.setSize(W, H);
+  return feedTreatment(small, W, H, F, k);
+};
+// tracking three-quarter camera with root motion, for video frames
+window.shootTrack = async (name, k) => {
+  _poseFrame(name, k, true); setMarkers(false);
+  const r = S.nodes.hips.getAbsolutePosition(); const c = new B.Vector3(r.x, 0.9, r.z);
+  makeCam(c.add(dir(rad(-55), rad(14)).scale(4.8)), c, 0.55); return await render();
+};
+
+async function feedTreatment(src, W, H, F, k) {
+  const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = src; });
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
+  x.imageSmoothingEnabled = true; x.drawImage(img, 0, 0, W, H);
+  const d = x.getImageData(0, 0, W, H); const t = hex3(F.tint || '#9FC7A8');
+  for (let i = 0; i < d.data.length; i += 4) {
+    const l = (0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]) / 255;
+    const row = Math.floor(i / 4 / W); const sl = F.scanlines && (row % 4 < 2) ? 0.86 : 1; const n = (Math.random() - 0.5) * 0.06;
+    d.data[i] = 255 * Math.min(1, (l * t.r + n) * sl); d.data[i + 1] = 255 * Math.min(1, (l * t.g + n) * sl); d.data[i + 2] = 255 * Math.min(1, (l * t.b + n) * sl);
+  }
+  x.putImageData(d, 0, 0);
+  x.fillStyle = '#E0E0D0'; x.font = `${Math.round(H / 26)}px monospace`;
+  const s = 8 + k / cfg.fps; x.fillText(`${F.label || 'CAM'}-07  14:32:${String(Math.floor(s)).padStart(2, '0')}.${String(Math.floor((s % 1) * 100)).padStart(2, '0')}`, W * 0.03, H * 0.07);
+  return cv.toDataURL('image/png');
+}
+
+window.sheet = async (items, cols, title, scale = 0.5) => {
+  const imgs = await Promise.all(items.map(it => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = it.url; })));
+  const w = imgs[0].width, h = imgs[0].height, cw = w * scale, ch = h * scale, pad = 26;
+  const rows = Math.ceil(imgs.length / cols);
+  const cv = document.createElement('canvas'); cv.width = cw * cols; cv.height = rows * (ch + pad) + 36;
+  const x = cv.getContext('2d'); x.fillStyle = '#1b1c1c'; x.fillRect(0, 0, cv.width, cv.height);
+  x.fillStyle = '#e6e2d6'; x.font = '17px monospace'; x.fillText(title, 10, 24);
+  imgs.forEach((im, i) => {
+    const cx = (i % cols) * cw, cy = 36 + Math.floor(i / cols) * (ch + pad);
+    x.fillStyle = '#e0a030'; x.font = '13px monospace'; x.fillText(items[i].name, cx + 6, cy + 18);
+    x.drawImage(im, cx, cy + pad, cw, ch);
+  });
+  return cv.toDataURL('image/png');
+};
+</script>
+</body>
+</html>

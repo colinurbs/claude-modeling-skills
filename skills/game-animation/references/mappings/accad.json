@@ -1,0 +1,32 @@
+{
+ "name": "accad",
+ "description": "ACCAD Open Motion Project BVH (The Ohio State University; Female1, Male1, Male2): 22-joint MotionBuilder-named skeleton (Hips, ToSpine, Spine, Spine1, Neck, Head, L/R Shoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot, ToeBase), 30 fps, cm units, bind pose is a T-pose.",
+ "rest_frame": "bind",
+ "source_fps": 30,
+ "licence": "CC BY 3.0 Unported: credit 'Motion capture data from the ACCAD Open Motion Project, The Ohio State University (accad.osu.edu), licensed under CC BY 3.0; retargeted and edited.'",
+ "notes": "No fingers: relaxed hand pose applied. Neck sits 27 cm above Spine1 (the shoulders branch from Spine1), so upper_chest's rest direction is Spine1->Neck. Takes do not start in a T-pose: use the bind pose (rest_frame 'bind'). Hand end sites are unmapped. Male1/Male2 BVH bind poses are NOT T-poses (MotionBuilder offsets with the upper spine along +X, differing per take): use rest_frame 'neutral' for them (retarget picks the take's frame closest to the target rest pose), otherwise shoulders/neck get 130-160 deg of twist. Female1's bind is a clean T-pose. Capture floor is not level (hips rise ~6 cm over a 6 m walk): use ground 'plane'.",
+ "bones": {
+  "hips": "Hips",
+  "spine": "ToSpine",
+  "chest": "Spine",
+  "upper_chest": "Spine1",
+  "neck": "Neck",
+  "head": "Head",
+  "shoulder_l": "LeftShoulder",
+  "upper_arm_l": "LeftArm",
+  "lower_arm_l": "LeftForeArm",
+  "hand_l": "LeftHand",
+  "shoulder_r": "RightShoulder",
+  "upper_arm_r": "RightArm",
+  "lower_arm_r": "RightForeArm",
+  "hand_r": "RightHand",
+  "upper_leg_l": "LeftUpLeg",
+  "lower_leg_l": "LeftLeg",
+  "foot_l": "LeftFoot",
+  "toes_l": "LeftToeBase",
+  "upper_leg_r": "RightUpLeg",
+  "lower_leg_r": "RightLeg",
+  "foot_r": "RightFoot",
+  "toes_r": "RightToeBase"
+ }
+}

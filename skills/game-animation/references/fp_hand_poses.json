@@ -1,0 +1,409 @@
+{
+  "_doc": "Finger-pose library (game-animation first-person mode; usable by third person too). Angles in degrees per finger: flex [joint 01, 02, 03] (+ = curl toward the palm), spread (joint 01, + = away from the middle finger; thumb: + = away from the index), twist (joint 01 about the bone), oppose (thumb only: swings the thumb in front of the palm about the hand's long axis). Axes come from each skeleton's own rest joints (fplib.HandModel), so a pose retargets to any body on the shared skeleton. 'base' inherits another pose and overrides fingers. Poses marked fit are closed onto the held item by the build (fplib grip fit) -- the angles here are the upper bound of the close. Names match the weapons' ig_grip_pose / ig_grip_pose_l (assets/src/props/wpn_tools/catalog.py GRIP_POSES). Entries with _alias are not exported as clips.",
+  "poses": {
+    "relaxed": {
+      "thumb": {
+        "flex": [
+          4,
+          8,
+          6
+        ],
+        "oppose": 8
+      },
+      "index": {
+        "flex": [
+          14,
+          18,
+          10
+        ]
+      },
+      "middle": {
+        "flex": [
+          17,
+          22,
+          12
+        ]
+      },
+      "ring": {
+        "flex": [
+          21,
+          25,
+          12
+        ],
+        "spread": 2
+      },
+      "pinky": {
+        "flex": [
+          25,
+          28,
+          12
+        ],
+        "spread": 4
+      }
+    },
+    "open_palm": {
+      "thumb": {
+        "flex": [
+          -20,
+          4,
+          4
+        ],
+        "spread": -5,
+        "oppose": -20
+      },
+      "index": {
+        "flex": [
+          2,
+          3,
+          2
+        ],
+        "spread": 5
+      },
+      "middle": {
+        "flex": [
+          2,
+          3,
+          2
+        ]
+      },
+      "ring": {
+        "flex": [
+          3,
+          4,
+          2
+        ],
+        "spread": 4
+      },
+      "pinky": {
+        "flex": [
+          4,
+          5,
+          3
+        ],
+        "spread": 9
+      },
+      "_note": "open hand, fingers straight and a little apart, thumb in the palm plane ~34 deg off the index (was 18 spread/0 oppose: thumb ~37 deg off the index and ~40 deg out of the palm plane, read as sticking out; now ~10 deg out of plane, measured on char_fp_arms_bare_m_a)"
+    },
+    "fist": {
+      "thumb": {
+        "flex": [
+          20,
+          38,
+          34
+        ],
+        "oppose": 46
+      },
+      "index": {
+        "flex": [
+          76,
+          49,
+          28
+        ],
+        "spread": -2
+      },
+      "middle": {
+        "flex": [
+          80,
+          63,
+          36
+        ]
+      },
+      "ring": {
+        "flex": [
+          81,
+          61,
+          35
+        ],
+        "spread": -2
+      },
+      "pinky": {
+        "flex": [
+          80,
+          47,
+          27
+        ],
+        "spread": -3
+      },
+      "_note": "closed fist; PIP/DIP tuned on char_fp_arms_bare_m_a's skin so the fingertips meet the palm (<= 2 mm) instead of sinking 18-26 mm into it (was 82-86/90-92/52: the fingertip bumps on the palm)"
+    },
+    "pistol_grip": {
+      "_note": "trigger finger OFF: index straight along the frame above the trigger guard; fingers 3-5 wrap the grip; thumb high along the frame (fit); fingers 3-5 PIP/DIP on the fist retune (were 82/92/52: fingertips 22-24 mm into the palm skin with no item; now they meet it, <= 0.5 mm)",
+      "thumb": {
+        "flex": [
+          22,
+          32,
+          26
+        ],
+        "oppose": 40,
+        "spread": 2
+      },
+      "index": {
+        "flex": [
+          10,
+          8,
+          4
+        ],
+        "spread": 2
+      },
+      "middle": {
+        "flex": [
+          82,
+          64,
+          36
+        ]
+      },
+      "ring": {
+        "flex": [
+          82,
+          60,
+          34
+        ],
+        "spread": -1
+      },
+      "pinky": {
+        "flex": [
+          82,
+          47,
+          27
+        ],
+        "spread": -2
+      }
+    },
+    "pistol_trigger": {
+      "_note": "trigger finger ON: index pad on the trigger (fit closes it onto the trigger face)",
+      "base": "pistol_grip",
+      "index": {
+        "flex": [
+          34,
+          58,
+          30
+        ],
+        "spread": 0
+      }
+    },
+    "pinch": {
+      "_note": "thumb pad to index pad (~1.5 mm apart on char_fp_arms_bare_m_a, at the index tip): small objects (papers corner, wire, a round); fingers 3-5 stay relaxed. Was: pads ~17 mm apart, fingers 3-5 curled as deep as the index (a three-finger gather)",
+      "thumb": {
+        "flex": [
+          10,
+          10,
+          8
+        ],
+        "oppose": 40,
+        "spread": 8
+      },
+      "index": {
+        "flex": [
+          46,
+          50,
+          30
+        ]
+      },
+      "middle": {
+        "flex": [
+          22,
+          30,
+          15
+        ]
+      },
+      "ring": {
+        "flex": [
+          24,
+          32,
+          15
+        ],
+        "spread": 2
+      },
+      "pinky": {
+        "flex": [
+          26,
+          32,
+          14
+        ],
+        "spread": 4
+      }
+    },
+    "two_hand_support": {
+      "_note": "two-hand support grip (weak hand wraps the strong hand's fingers on a pistol grip): fingers 1-4 wrap, thumb forward along the frame (fit against item + strong hand); PIP/DIP on the fist retune (were 88/48: fingertips 16-22 mm into the palm skin with no item; now <= 0.5 mm)",
+      "thumb": {
+        "flex": [
+          4,
+          6,
+          4
+        ],
+        "oppose": 12,
+        "spread": 8
+      },
+      "index": {
+        "flex": [
+          72,
+          60,
+          33
+        ]
+      },
+      "middle": {
+        "flex": [
+          76,
+          68,
+          37
+        ]
+      },
+      "ring": {
+        "flex": [
+          78,
+          66,
+          36
+        ]
+      },
+      "pinky": {
+        "flex": [
+          80,
+          50,
+          28
+        ],
+        "spread": -2
+      }
+    },
+    "support": {
+      "base": "two_hand_support",
+      "_alias": true,
+      "_note": "alias of two_hand_support"
+    },
+    "cup": {
+      "_note": "cupped hand, a scoop / cradle (2026-10-13, 8 critic rounds): shielding a lighter flame (molotov, pipe bomb), the revolver/pistol support cup, under a magazine base, catching. Seen from the back (where the first-person support hand is mostly seen) the fingers hang together as one wall and curl away to a fingertip lip; the tips are level (along the long axis from the wrist joint: index 135, middle 135, ring 131, pinky 123 mm; relaxed ~147, fist ~63), so it reads neither as a loose fist (2026-10-12: MCP 30/44/56/50, tips hidden under the knuckles) nor as a lazy relaxed hand. Flex MCP/PIP/DIP index 24/18/16, middle 26/30/16, ring 24/22/18, pinky 12/8/14 (the curl tuned per finger to level the tips). Bases adducted toward the middle (spread -23/+4/-16/-6) with outward twists (+3/+8/+7/+24) so the proximal phalanges close (gaps 1.8/1.5/0.9 mm) while the tips fan back out into a lip (span 0.88 of the knuckle width; adducting the tips instead made a purse/beak, 0.33-0.52). Skin gaps (middle/distal) i-m 1.9, m-r 2.6, r-p 3.6 mm, no penetration. The palm fold is the arms' corrective shape key palm_fold_<side> (\"morphs\", weight 1; assets/src/char_fp/_fp_palm_fold.py: palm skin rolls 16 deg toward the palm at the pinky metacarpal and 5 at the index, hands over to the knuckle translation near the knuckle row, finger skin translates with its knuckle, 2.5 mm palm-centre hollow) because the skeleton has no metacarpal bones. Bodies without the key (third person) get the finger pose only. Thumb as the side wall along the index (MCP -5, PIP 0, DIP 0, spread -30, oppose 8): 4.3 mm off the index skin, tip ~27 mm short of the index tip; thumb_clear_mm 3 is checked by fp.thumb_clearance (validate applies the pose morphs before the skin checks). Open minors (critic round 8): a dark slit between index and middle from the back (index twist -2 / MCP +2 would tuck it), the knuckle row still nearly straight from the back (fold 22 deg at the pinky), thumb tip over the index middle phalanx from the thumb side, palm hollow too shallow to read, top view a knob. History: _work/cup_2026-10-04.json (fanned), cup_2026-10-11.json (claw), cup_pre_0545.json (straight knuckle line), fp_hand_poses_pre_2026-10-13.json (2026-10-12 b, loose fist from the back).",
+      "thumb": {"flex": [-5, 0, 0], "oppose": 8, "spread": -30},
+      "index": {"flex": [24, 18, 16], "spread": -23, "twist": 3},
+      "middle": {"flex": [26, 30, 16], "spread": 4, "twist": 8},
+      "ring": {"flex": [24, 22, 18], "spread": -16, "twist": 7},
+      "pinky": {"flex": [12, 8, 14], "spread": -6, "twist": 24},
+      "morphs": {"palm_fold": 1.0},
+      "thumb_clear_mm": 3.0
+    },
+    "mag_hold": {
+      "_note": "fresh magazine held for insertion: fingers wrap the mag body, index along its front, base in the palm (pinky PIP/DIP 76/40 -> 64/34: was 5 mm into the palm)",
+      "thumb": {
+        "flex": [
+          10,
+          22,
+          18
+        ],
+        "oppose": 30
+      },
+      "index": {
+        "flex": [
+          34,
+          40,
+          24
+        ],
+        "spread": 2
+      },
+      "middle": {
+        "flex": [
+          62,
+          76,
+          40
+        ]
+      },
+      "ring": {
+        "flex": [
+          66,
+          76,
+          40
+        ]
+      },
+      "pinky": {
+        "flex": [
+          68,
+          64,
+          34
+        ],
+        "spread": -2
+      }
+    },
+    "overhand": {
+      "_note": "overhand grab (pistol slide rear, a door handle from above): fingers HOOKED -- knuckles nearly straight, middle joints bent ~70 deg, tips 1-2 cm off the palm -- thumb opposed below (was a near-fist: MCP 55-62 / PIP 72-74, tips 2-8 mm off the palm, pinky 4 mm into it)",
+      "thumb": {
+        "flex": [
+          14,
+          30,
+          25
+        ],
+        "oppose": 40,
+        "spread": 4
+      },
+      "index": {
+        "flex": [
+          24,
+          72,
+          38
+        ]
+      },
+      "middle": {
+        "flex": [
+          26,
+          74,
+          40
+        ]
+      },
+      "ring": {
+        "flex": [
+          28,
+          74,
+          40
+        ]
+      },
+      "pinky": {
+        "flex": [
+          30,
+          68,
+          36
+        ],
+        "spread": -2
+      }
+    },
+    "flat_push": {
+      "_note": "flat hand pushing (a door, a person): fingers pressed together (gaps 1-2 mm on char_fp_arms_bare_m_a, whose rest fingers are splayed 9-15 mm apart, hence spreads -25/0/-13/-29) and bent back ~18 deg at the knuckles; thumb lying in the palm plane (~7 deg out of it, ~42 deg off the index; spread -27 puts its tip ~9 mm into the palm edge, oppose beyond -30 over-twists thumb_01). Distinct from open_palm (fanned fingers 10-17 mm apart, straight). Was: fingers fanned like open_palm, thumb ~39 deg off the index and ~39 deg out of the palm plane",
+      "thumb": {
+        "flex": [
+          -25,
+          4,
+          0
+        ],
+        "spread": -24,
+        "oppose": -28
+      },
+      "index": {
+        "flex": [
+          -18,
+          0,
+          0
+        ],
+        "spread": -25
+      },
+      "middle": {
+        "flex": [
+          -19,
+          0,
+          0
+        ],
+        "spread": 0
+      },
+      "ring": {
+        "flex": [
+          -18,
+          0,
+          0
+        ],
+        "spread": -13
+      },
+      "pinky": {
+        "flex": [
+          -16,
+          2,
+          0
+        ],
+        "spread": -29
+      }
+    }
+  }
+}

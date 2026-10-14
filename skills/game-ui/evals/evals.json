@@ -1,0 +1,8 @@
+{
+ "skill_name": "game-ui",
+ "evals": [
+  {"id": 1, "prompt": "In irongrip, add the rebel HUD icons from ASSETS.md §11 (suspicion, objective marker, squad marker, compass, ammo, papers prompt) as a new icon set. Keep them near-nothing per S10.", "expected_output": "assets/src/ui/icons/ui_iconset_rebel/{brief.json,glyphs.py} with intent notes; export/ui/icons/ui_iconset_rebel.json + SVGs + chalk atlases; validate PASS; review plates; no client edits; new words listed.", "files": []},
+  {"id": 2, "prompt": "We need the Unrest gauge for the Governor: a phosphor meter that fits the control room. Make it a UI asset both clients can use.", "expected_output": "a ui_panel_ or ui_tpl_ asset with a nine-slice or fixed face, slots for the needle/segments from tokens, CRT treatment noted, validate PASS, review plate, integration asks.", "files": []},
+  {"id": 3, "prompt": "does the dispatch icon set read at 16px? the curfew and refusal icons look the same to me", "expected_output": "runs validate (distinctness, legibility) and review, reports the IoU of the pair at 16 px, proposes and makes a glyph change in glyphs.py, re-validates and re-reviews.", "files": []}
+ ]
+}

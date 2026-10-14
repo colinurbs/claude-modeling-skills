@@ -1,0 +1,22 @@
+{
+  "id": "",
+  "category": "",
+  "tier": "S",
+  "status": "wip",
+  "track": "invented",
+  "source": "make",
+  "what": "One sentence: what it is, where it stands in the world, who touches it.",
+  "dims": { "x": null, "y": null, "z": null, "tol": 0.05, "basis": "where the numbers came from (spec reference dims, a standard, a measured reference)" },
+  "pivot": "",
+  "budget_class": "",
+  "density_class": "",
+  "collider": "",
+  "props": {},
+  "materials": [],
+  "variants": [],
+  "sockets": [],
+  "views": { "primary": "eye", "why": "how players mostly see this: eye (first person), iso (commander), feed (CCTV), held (view model)" },
+  "references": [],
+  "style_notes": "Which style-guide rules apply (layer: original / neglect / state; palette role; S13 risks).",
+  "notes": ""
+}

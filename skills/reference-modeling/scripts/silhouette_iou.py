@@ -73,7 +73,12 @@ def silhouette_iou(obj_names, mask_path, ref_empty="REF_side",
         cam_d.sensor_fit = 'HORIZONTAL'; cam_d.ortho_scale = world_w
         cam_o = bpy.data.objects.new("IOU_CAM", cam_d); scene.collection.objects.link(cam_o)
         rot = mathutils.Matrix((ex, ey, n)).transposed().to_4x4()
-        cam_o.matrix_world = mathutils.Matrix.Translation(center + n * 1.0) @ rot
+        # stand off far enough to clear the whole model whatever its size / the empty's offset
+        span = max([max(o.dimensions) + o.matrix_world.translation.length
+                    for o in bpy.data.objects if o.name in set(obj_names)] + [1.0])
+        dist = 2.0 * span + (center.length if center.length < 1e4 else 0.0) + 1.0
+        cam_d.clip_start = 0.001 * dist; cam_d.clip_end = 4.0 * dist
+        cam_o.matrix_world = mathutils.Matrix.Translation(center + n * dist) @ rot
         scene.camera = cam_o
 
         # 6. render + read alpha coverage

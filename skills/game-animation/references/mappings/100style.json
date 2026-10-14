@@ -1,0 +1,31 @@
+{
+ "name": "100style",
+ "description": "100STYLE dataset BVH (Mason et al. 2022, CC BY 4.0): 100 locomotion styles, 60 fps, Xsens-derived skeleton with Chest..Chest4.",
+ "rest_frame": "bind",
+ "licence": "CC BY 4.0: credit 'I. Mason, S. Starke, T. Komura, 100STYLE (2022)' in LICENSES.md and the clip notes.",
+ "notes": "No finger joints: relaxed hand pose is applied. Chest3 is dropped. Verify joint names on the first file (`anim_cli.py scan`); styles such as 'Old', 'Tired', 'Depressed' suit civilians.",
+ "bones": {
+  "hips": "Hips",
+  "spine": "Chest",
+  "chest": "Chest2",
+  "upper_chest": "Chest4",
+  "neck": "Neck",
+  "head": "Head",
+  "shoulder_l": "LeftCollar",
+  "upper_arm_l": "LeftShoulder",
+  "lower_arm_l": "LeftElbow",
+  "hand_l": "LeftWrist",
+  "shoulder_r": "RightCollar",
+  "upper_arm_r": "RightShoulder",
+  "lower_arm_r": "RightElbow",
+  "hand_r": "RightWrist",
+  "upper_leg_l": "LeftHip",
+  "lower_leg_l": "LeftKnee",
+  "foot_l": "LeftAnkle",
+  "toes_l": "LeftToe",
+  "upper_leg_r": "RightHip",
+  "lower_leg_r": "RightKnee",
+  "foot_r": "RightAnkle",
+  "toes_r": "RightToe"
+ }
+}

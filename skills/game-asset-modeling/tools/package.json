@@ -1,0 +1,12 @@
+{
+  "name": "game-asset-modeling-tools",
+  "private": true,
+  "type": "module",
+  "description": "Review harness (Babylon + Playwright) and Khronos glTF validation for the game-asset-modeling skill",
+  "dependencies": {
+    "babylonjs": "^9.28.0",
+    "babylonjs-loaders": "^9.28.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
+    "playwright": "^1.63.0"
+  }
+}
